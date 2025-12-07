@@ -68,15 +68,13 @@ async function fetchWithRetry(url, options = {}, retryCount = 0) {
 
     clearTimeout(timeout);
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
+    // Don't throw for HTTP errors - let endpoint handlers deal with them
+    // This allows proper error parsing (like rate limit detection)
     return response;
   } catch (error) {
     clearTimeout(timeout);
 
-    // Check if error is retryable
+    // Check if error is retryable (network/connection errors only, not HTTP errors)
     const isRetryable =
       RETRY_CONFIG.retryableErrors.some((errCode) =>
         error.message.includes(errCode),
@@ -85,6 +83,12 @@ async function fetchWithRetry(url, options = {}, retryCount = 0) {
       error.message.includes("socket") ||
       error.message.includes("TLS") ||
       error.message.includes("network");
+
+    // Don't retry HTTP errors (4xx, 5xx) - they need special handling
+    const isHttpError = error.message.match(/HTTP \d{3}:/);
+    if (isHttpError) {
+      throw error;
+    }
 
     if (isRetryable && retryCount < RETRY_CONFIG.maxRetries) {
       const delay = RETRY_CONFIG.retryDelay * Math.pow(2, retryCount); // Exponential backoff
