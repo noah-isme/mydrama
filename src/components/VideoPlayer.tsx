@@ -28,6 +28,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [settings, setSettings] = useState<PlayerSettings>({
     playbackSpeed: 1,
     quality: "auto",
@@ -82,6 +84,34 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onEpisodeChange(value);
     }
   };
+
+  /**
+   * Show controls and reset hide timer
+   */
+  const handleMouseMove = () => {
+    setShowControls(true);
+
+    // Clear existing timeout
+    if (hideControlsTimeoutRef.current) {
+      clearTimeout(hideControlsTimeoutRef.current);
+    }
+
+    // Set new timeout to hide controls after 3 seconds
+    hideControlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 3000);
+  };
+
+  /**
+   * Cleanup timeout on unmount
+   */
+  useEffect(() => {
+    return () => {
+      if (hideControlsTimeoutRef.current) {
+        clearTimeout(hideControlsTimeoutRef.current);
+      }
+    };
+  }, []);
 
   /**
    * Toggle play/pause
@@ -171,6 +201,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       window.removeEventListener('keydown', handleKeyPress);
     };
   }, []);
+
+  /**
+   * Show controls when any action is performed
+   */
+  const handleControlAction = (action: () => void) => {
+    action();
+    handleMouseMove(); // Reset hide timer
+  };
 
   const playbackSpeedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const qualityOptions = ["auto", "1080p", "720p", "480p", "360p"];
@@ -320,7 +358,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         )}
 
         {/* Video Player */}
-        <div className="video-player-wrapper" ref={containerRef}>
+        <div
+          className={`video-player-wrapper ${showControls ? 'show-controls' : ''}`}
+          ref={containerRef}
+          onMouseMove={handleMouseMove}
+          onMouseEnter={handleMouseMove}
+        >
           <div className="video-player">
             {videoUrl ? (
               <>
@@ -343,10 +386,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </video>
 
                 {/* Custom Video Controls Overlay */}
-                <div className="custom-video-controls">
+                <div className={`custom-video-controls ${showControls ? 'visible' : ''}`}>
                   <button
                     className="control-btn"
-                    onClick={skipBackward}
+                    onClick={() => handleControlAction(skipBackward)}
                     title="Backward 10s (←)"
                   >
                     <span className="control-icon">⏪</span>
@@ -355,7 +398,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                   <button
                     className="control-btn play-pause-btn"
-                    onClick={togglePlayPause}
+                    onClick={() => handleControlAction(togglePlayPause)}
                     title="Play/Pause (Space)"
                   >
                     <span className="control-icon">
@@ -365,7 +408,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                   <button
                     className="control-btn"
-                    onClick={skipForward}
+                    onClick={() => handleControlAction(skipForward)}
                     title="Forward 10s (→)"
                   >
                     <span className="control-icon">⏩</span>
@@ -374,7 +417,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                   <button
                     className="control-btn fullscreen-btn"
-                    onClick={toggleFullscreen}
+                    onClick={() => handleControlAction(toggleFullscreen)}
                     title="Fullscreen (F)"
                   >
                     <span className="control-icon">
@@ -384,7 +427,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
 
                 {/* Keyboard Shortcuts Info */}
-                <div className="keyboard-shortcuts">
+                <div className={`keyboard-shortcuts ${showControls ? 'visible' : ''}`}>
                   <div className="shortcut-hint">
                     <kbd>Space</kbd> Play/Pause
                   </div>
@@ -877,6 +920,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           z-index: 100;
         }
 
+        .custom-video-controls.visible {
+          opacity: 1;
+        }
+
         .video-player-wrapper:hover .custom-video-controls {
           opacity: 1;
         }
@@ -956,6 +1003,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           z-index: 100;
         }
 
+        .keyboard-shortcuts.visible {
+          opacity: 1;
+        }
+
         .video-player-wrapper:hover .keyboard-shortcuts {
           opacity: 1;
         }
@@ -988,6 +1039,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         .video-player-wrapper:fullscreen .video-player {
           width: 100vw;
           height: 100vh;
+        }
+
+        /* Hide cursor when controls are hidden */
+        .video-player-wrapper {
+          cursor: default;
+        }
+
+        .video-player-wrapper:not(.show-controls) {
+          cursor: none;
         }
 
         .video-player-wrapper:fullscreen .custom-video-controls {
