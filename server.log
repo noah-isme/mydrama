@@ -1,0 +1,5 @@
+🎬 DramaBox Server berjalan di http://localhost:3000
+📺 Buka browser dan akses http://localhost:3000
+✅ Menggunakan API Real dari sansekai.my.id
+🔄 Fetching from external API: /api/dramabox/latest
+❌ Error fetching latest: Client network socket disconnected before secure TLS connection was established

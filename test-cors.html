@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test CORS - DramaBox</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #764ba2;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            background: #f0f0f0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .success {
+            border-left: 4px solid #00C851;
+        }
+        .error {
+            border-left: 4px solid #ff4444;
+        }
+        h2 {
+            color: #333;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔓 Test CORS Bypass - DramaBox API</h1>
+    
+    <div class="info">
+        <strong>ℹ️ Info:</strong> Pastikan server berjalan di <code>http://localhost:3000</code>
+        <br>Jalankan: <code>npm start</code>
+    </div>
+
+    <div class="test-section">
+        <h2>1. Test CORS Headers</h2>
+        <p>Test apakah server mengirim CORS headers yang benar</p>
+        <button onclick="testCorsHeaders()">Test CORS Headers</button>
+        <div id="cors-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test API Latest</h2>
+        <p>Test endpoint /latest untuk mendapatkan drama terbaru</p>
+        <button onclick="testLatestAPI()">Test Latest API</button>
+        <div id="latest-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Test API Search</h2>
+        <p>Test endpoint /search dengan keyword</p>
+        <input type="text" id="searchKeyword" placeholder="Keyword (e.g., pewaris)" value="pewaris" style="padding: 8px; margin-right: 10px; width: 200px;">
+        <button onclick="testSearchAPI()">Test Search API</button>
+        <div id="search-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Test Cross-Origin Request</h2>
+        <p>Test CORS dari origin yang berbeda</p>
+        <button onclick="testCrossOrigin()">Test Cross-Origin</button>
+        <div id="cross-origin-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000';
+
+        function formatResult(data, success = true) {
+            return JSON.stringify(data, null, 2);
+        }
+
+        function showResult(elementId, message, success = true) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = success ? 'result success' : 'result error';
+        }
+
+        async function testCorsHeaders() {
+            const resultEl = document.getElementById('cors-result');
+            resultEl.textContent = '⏳ Testing CORS headers...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/latest`, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': 'http://test.com',
+                        'Access-Control-Request-Method': 'GET',
+                        'Access-Control-Request-Headers': 'Content-Type'
+                    }
+                });
+
+                const headers = {};
+                response.headers.forEach((value, key) => {
+                    if (key.toLowerCase().includes('access-control')) {
+                        headers[key] = value;
+                    }
+                });
+
+                const result = {
+                    status: response.status,
+                    statusText: response.statusText,
+                    corsHeaders: headers
+                };
+
+                showResult('cors-result', 
+                    '✅ CORS Headers:\n' + formatResult(result), 
+                    response.status === 200
+                );
+            } catch (error) {
+                showResult('cors-result', 
+                    '❌ Error: ' + error.message, 
+                    false
+                );
+            }
+        }
+
+        async function testLatestAPI() {
+            const resultEl = document.getElementById('latest-result');
+            resultEl.textContent = '⏳ Testing /latest endpoint...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/latest?page=1`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                const summary = {
+                    status: response.status,
+                    success: data.status,
+                    dataCount: data.data ? data.data.length : 0,
+                    firstItem: data.data && data.data[0] ? {
+                        name: data.data[0].name,
+                        bookId: data.data[0].bookId,
+                        chapterNum: data.data[0].chapterNum
+                    } : null
+                };
+
+                showResult('latest-result', 
+                    '✅ Latest API Response:\n' + formatResult(summary), 
+                    data.status
+                );
+            } catch (error) {
+                showResult('latest-result', 
+                    '❌ Error: ' + error.message, 
+                    false
+                );
+            }
+        }
+
+        async function testSearchAPI() {
+            const keyword = document.getElementById('searchKeyword').value.trim();
+            const resultEl = document.getElementById('search-result');
+            
+            if (!keyword) {
+                showResult('search-result', '❌ Masukkan keyword!', false);
+                return;
+            }
+
+            resultEl.textContent = '⏳ Searching for "' + keyword + '"...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/search?keyword=${encodeURIComponent(keyword)}`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                const summary = {
+                    status: response.status,
+                    success: data.status,
+                    keyword: keyword,
+                    resultCount: data.data ? data.data.length : 0,
+                    results: data.data ? data.data.map(item => ({
+                        name: item.name,
+                        bookId: item.bookId
+                    })) : []
+                };
+
+                showResult('search-result', 
+                    '✅ Search Results:\n' + formatResult(summary), 
+                    data.status
+                );
+            } catch (error) {
+                showResult('search-result', 
+                    '❌ Error: ' + error.message, 
+                    false
+                );
+            }
+        }
+
+        async function testCrossOrigin() {
+            const resultEl = document.getElementById('cross-origin-result');
+            resultEl.textContent = '⏳ Testing cross-origin request...';
+            
+            try {
+                // Simulasi request dari origin berbeda
+                const response = await fetch(`${API_BASE}/latest?page=1`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Origin': 'http://different-origin.com'
+                    }
+                });
+
+                const corsAllowed = response.headers.get('Access-Control-Allow-Origin');
+                const corsCredentials = response.headers.get('Access-Control-Allow-Credentials');
+
+                const result = {
+                    status: response.status,
+                    corsAllowOrigin: corsAllowed,
+                    corsAllowCredentials: corsCredentials,
+                    message: corsAllowed === '*' || corsAllowed ? 
+                        'CORS berhasil! Origin diizinkan' : 
+                        'CORS mungkin terblokir'
+                };
+
+                showResult('cross-origin-result', 
+                    '✅ Cross-Origin Test:\n' + formatResult(result), 
+                    !!corsAllowed
+                );
+            } catch (error) {
+                showResult('cross-origin-result', 
+                    '❌ Error: ' + error.message + '\n\nKemungkinan CORS terblokir atau server tidak berjalan', 
+                    false
+                );
+            }
+        }
+
+        // Auto test on load
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('🔓 CORS Test Page loaded');
+            console.log('API Base:', API_BASE);
+        });
+    </script>
+</body>
+</html>
