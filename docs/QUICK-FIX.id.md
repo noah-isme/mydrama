@@ -37,6 +37,54 @@ curl http://localhost:3000/health
 
 ---
 
+## ⏱️ Error: Rate Limit / IP Terkena Limit
+
+```
+❌ Error: HTTP 429: Upstream API rate limit reached
+❌ IP terkena limit, silakan tunggu beberapa menit dan coba lagi
+```
+
+### ✅ Solusi Cepat:
+```bash
+# 1. Tunggu 5-10 menit
+# Rate limit biasanya reset otomatis setelah beberapa menit
+
+# 2. Stop backend
+# Tekan Ctrl+C
+
+# 3. Tunggu 5 menit, lalu start lagi
+pnpm dev:backend
+
+# 4. Jika masih error, tunggu lebih lama (10-15 menit)
+```
+
+### 💡 Penjelasan:
+- Upstream API (dramabox.sansekai.my.id) membatasi request per IP
+- Terlalu banyak request dalam waktu singkat akan kena limit
+- Backend otomatis return HTTP 429 dengan pesan user-friendly
+- `retryAfter: 300` = tunggu 5 menit (300 detik)
+
+### 🔍 Check Status:
+```bash
+# Test stream endpoint
+curl "http://localhost:3000/stream?bookId=123&episode=1"
+
+# Jika kena rate limit, response:
+# {
+#   "status": false,
+#   "message": "Upstream API rate limit reached...",
+#   "retryAfter": 300
+# }
+```
+
+### 🚫 Pencegahan:
+- Jangan spam request
+- Tunggu beberapa detik antara request
+- Jangan refresh halaman berkali-kali
+- Tunggu video selesai load sebelum ganti episode
+
+---
+
 ## 🌐 Error: CORS Blocked
 
 ```
@@ -279,6 +327,7 @@ Sebelum report bug, cek dulu:
 - [ ] ✅ Frontend running? → Buka http://localhost:5173
 - [ ] ✅ Internet OK? → `ping google.com`
 - [ ] ✅ Upstream API OK? → `curl -I https://dramabox.sansekai.my.id`
+- [ ] ✅ Rate limit OK? → Tunggu 5 menit jika baru request banyak
 - [ ] ✅ Node.js version? → `node -v` (Should be 16+)
 - [ ] ✅ pnpm installed? → `pnpm -v` (Should be 10.x)
 - [ ] ✅ Browser console clean? → F12, check for errors
@@ -390,5 +439,7 @@ NODE_ENV=production node backend/server.js
 **Last Updated:** 2024-01-01  
 **Version:** 2.1.0  
 **Status:** Production Ready ✨
+
+**Note:** v2.1.0 includes automatic rate limit detection with HTTP 429 responses.
 
 Made with ❤️ by DramaBox API Team

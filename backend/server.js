@@ -233,16 +233,80 @@ app.get("/stream", async (req, res) => {
     }
 
     console.log(`🎬 Proxying stream: ${bookId} ep${episode}`);
-    const response = await fetchWithRetry(
-      `https://dramabox.sansekai.my.id/api/dramabox/stream?bookId=${bookId}&episode=${episode}`,
-    );
+    const upstreamUrl = `https://dramabox.sansekai.my.id/api/dramabox/stream?bookId=${bookId}&episode=${episode}`;
+
+    const response = await fetchWithRetry(upstreamUrl);
+
+    // Check if response is ok
+    if (!response.ok) {
+      console.error(`❌ Upstream API returned ${response.status}: ${response.statusText}`);
+      console.error(`   URL: ${upstreamUrl}`);
+
+      // Try to get error details from response
+      let errorDetails = "Unknown error";
+      let errorData = null;
+      try {
+        const errorText = await response.text();
+        errorDetails = errorText;
+        console.error(`   Response: ${errorText.substring(0, 200)}`);
+
+        // Try to parse as JSON
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          // Not JSON, keep as text
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+
+      // Check for rate limit error
+      if (errorData && (errorData.error || errorData.message)) {
+        const errorMsg = errorData.error || errorData.message || '';
+
+        if (errorMsg.includes('limit') || errorMsg.includes('tunggu')) {
+          console.warn(`⚠️  Rate limit detected: ${errorMsg}`);
+          return res.status(429).json({
+            status: false,
+            message: 'Upstream API rate limit reached. Please wait a few minutes and try again.',
+            error: errorMsg,
+            retryAfter: 300, // 5 minutes
+            bookId,
+            episode,
+          });
+        }
+      }
+
+      return res.status(502).json({
+        status: false,
+        message: `Upstream API error: ${response.status} ${response.statusText}`,
+        details: errorDetails.substring(0, 500),
+        bookId,
+        episode,
+      });
+    }
+
     const streamData = await response.json();
+
+    // Log response structure for debugging
+    console.log(`📊 Stream response structure:`, {
+      isArray: Array.isArray(streamData),
+      length: Array.isArray(streamData) ? streamData.length : 'N/A',
+      hasData: !!streamData,
+      keys: streamData ? Object.keys(streamData).slice(0, 5) : [],
+    });
 
     // Parse video URL from response
     let videoUrl = null;
+    let episodeInfo = null;
 
     if (Array.isArray(streamData) && streamData.length > 0) {
       const episodeData = streamData[0];
+      episodeInfo = {
+        hasCdnList: !!episodeData.cdnList,
+        cdnListLength: episodeData.cdnList?.length || 0,
+      };
+
       if (
         episodeData.cdnList &&
         episodeData.cdnList[0] &&
@@ -250,12 +314,54 @@ app.get("/stream", async (req, res) => {
       ) {
         const videos = episodeData.cdnList[0].videoPathList;
         const defaultVideo = videos.find((v) => v.isDefault === 1) || videos[0];
-        videoUrl = defaultVideo.videoPath;
+        videoUrl = defaultVideo?.videoPath;
+
+        console.log(`📹 Found ${videos.length} video qualities`);
+      } else {
+        console.warn(`⚠️  Episode data structure unexpected:`, episodeInfo);
+      }
+    } else if (streamData && typeof streamData === 'object') {
+      // Try alternative response structure
+      if (streamData.videoPath) {
+        videoUrl = streamData.videoPath;
+        console.log(`📹 Found video in alternative structure`);
+      } else if (streamData.url) {
+        videoUrl = streamData.url;
+        console.log(`📹 Found video URL in alternative structure`);
       }
     }
 
     if (!videoUrl) {
-      throw new Error("Video URL not found in response");
+      console.error("❌ Could not extract video URL from response");
+      console.error("   Response structure:", JSON.stringify(streamData, null, 2).substring(0, 500));
+
+      // Check if response indicates an error
+      if (streamData && (streamData.error || streamData.message)) {
+        const errorMsg = streamData.error || streamData.message;
+        console.error("   API Error:", errorMsg);
+
+        if (errorMsg.includes('limit') || errorMsg.includes('tunggu')) {
+          return res.status(429).json({
+            status: false,
+            message: 'Upstream API rate limit reached. Please wait a few minutes and try again.',
+            error: errorMsg,
+            retryAfter: 300,
+            bookId,
+            episode,
+          });
+        }
+      }
+
+      return res.status(404).json({
+        status: false,
+        message: "Video URL not found in upstream response. The drama might not be available or episode doesn't exist.",
+        debug: {
+          bookId,
+          episode,
+          responseType: Array.isArray(streamData) ? 'array' : typeof streamData,
+          responseKeys: streamData ? Object.keys(streamData).slice(0, 10) : [],
+        },
+      });
     }
 
     console.log("✅ Stream URL obtained");
@@ -269,10 +375,14 @@ app.get("/stream", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error:", error.message);
+    console.error("   Stack:", error.stack?.split('\n').slice(0, 3).join('\n'));
+
     res.status(500).json({
       status: false,
       message: error.message,
       error: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      bookId: req.query.bookId,
+      episode: req.query.episode || 1,
     });
   }
 });

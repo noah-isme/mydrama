@@ -7,12 +7,13 @@ Panduan lengkap untuk mengatasi masalah umum yang mungkin terjadi pada DramaBox 
 ## 📋 Daftar Isi
 
 1. [TLS Connection Errors](#tls-connection-errors)
-2. [CORS Errors](#cors-errors)
-3. [Video Playback Issues](#video-playback-issues)
-4. [Search Not Working](#search-not-working)
-5. [Missing Thumbnails](#missing-thumbnails)
-6. [Performance Issues](#performance-issues)
-7. [Build & Development Errors](#build--development-errors)
+2. [Rate Limit Errors](#rate-limit-errors)
+3. [CORS Errors](#cors-errors)
+4. [Video Playback Issues](#video-playback-issues)
+5. [Search Not Working](#search-not-working)
+6. [Missing Thumbnails](#missing-thumbnails)
+7. [Performance Issues](#performance-issues)
+8. [Build & Development Errors](#build--development-errors)
 
 ---
 
@@ -101,6 +102,67 @@ const httpsAgent = new https.Agent({
 ```
 
 Jika Anda melihat log retry, artinya sistem sedang mencoba mengatasi error secara otomatis.
+
+---
+
+## ⏱️ Rate Limit Errors
+
+### Error: "Upstream API rate limit reached"
+
+**Gejala:**
+```
+❌ Error: HTTP 429: Upstream API rate limit reached
+IP terkena limit, silakan tunggu beberapa menit dan coba lagi
+```
+
+**Penyebab:**
+- Terlalu banyak request ke upstream API dalam waktu singkat
+- IP address kena rate limit dari server dramabox.sansekai.my.id
+- Upstream API membatasi jumlah request per IP
+
+**Solusi:**
+
+1. **Tunggu Beberapa Menit:**
+   ```bash
+   # Wait 5-10 minutes before trying again
+   # Rate limit biasanya reset setelah 5-10 menit
+   ```
+
+2. **Restart Backend dengan Delay:**
+   ```bash
+   # Stop backend
+   # Tunggu 5 menit
+   # Start lagi
+   pnpm dev:backend
+   ```
+
+3. **Check Rate Limit Response:**
+   ```bash
+   curl -s "http://localhost:3000/stream?bookId=123&episode=1"
+   # Should return:
+   # {
+   #   "status": false,
+   #   "message": "Upstream API rate limit reached...",
+   #   "retryAfter": 300
+   # }
+   ```
+
+4. **Implementation Note:**
+   - Backend will return HTTP 429 (Too Many Requests)
+   - Frontend should display user-friendly message
+   - Suggest waiting before retrying
+
+**Prevention:**
+- Don't spam requests
+- Implement request throttling on frontend
+- Cache responses when possible
+- Use reasonable retry delays
+
+**Future Enhancement:**
+In v2.2.0, we plan to add:
+- Response caching layer
+- Request rate limiting on backend
+- Better retry strategies with exponential backoff
 
 ---
 
