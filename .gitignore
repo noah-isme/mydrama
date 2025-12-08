@@ -1,7 +1,7 @@
 /node_modules
 package-lock.json
-pnpm-lock.yaml
 token.js
+.vercel
 
 # Vite
 dist

@@ -400,35 +400,40 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Graceful shutdown
-const server = app.listen(PORT, () => {
-  console.log(`🎬 DramaBox CORS Proxy: http://localhost:${PORT}`);
-  console.log(`✅ CORS BYPASS ENABLED!`);
-  console.log(`📺 Open: http://localhost:${PORT}/index.html`);
-  console.log(`🔗 Proxying to: https://dramabox.sansekai.my.id/api/dramabox`);
-  console.log(
-    `🔄 Retry enabled: ${RETRY_CONFIG.maxRetries} attempts with exponential backoff`,
-  );
-  console.log(`⏱️  Connection timeout: 30s, Keep-alive enabled`);
-});
+// Export for serverless (Vercel)
+export default app;
 
-// Handle graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("🛑 SIGTERM received, closing server gracefully...");
-  server.close(() => {
-    console.log("✅ Server closed");
-    httpsAgent.destroy();
-    httpAgent.destroy();
-    process.exit(0);
+// Only start server if not in serverless environment
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const server = app.listen(PORT, () => {
+    console.log(`🎬 DramaBox CORS Proxy: http://localhost:${PORT}`);
+    console.log(`✅ CORS BYPASS ENABLED!`);
+    console.log(`📺 Open: http://localhost:${PORT}/index.html`);
+    console.log(`🔗 Proxying to: https://dramabox.sansekai.my.id/api/dramabox`);
+    console.log(
+      `🔄 Retry enabled: ${RETRY_CONFIG.maxRetries} attempts with exponential backoff`,
+    );
+    console.log(`⏱️  Connection timeout: 30s, Keep-alive enabled`);
   });
-});
 
-process.on("SIGINT", () => {
-  console.log("\n🛑 SIGINT received, closing server gracefully...");
-  server.close(() => {
-    console.log("✅ Server closed");
-    httpsAgent.destroy();
-    httpAgent.destroy();
-    process.exit(0);
+  // Handle graceful shutdown
+  process.on("SIGTERM", () => {
+    console.log("🛑 SIGTERM received, closing server gracefully...");
+    server.close(() => {
+      console.log("✅ Server closed");
+      httpsAgent.destroy();
+      httpAgent.destroy();
+      process.exit(0);
+    });
   });
-});
+
+  process.on("SIGINT", () => {
+    console.log("\n🛑 SIGINT received, closing server gracefully...");
+    server.close(() => {
+      console.log("✅ Server closed");
+      httpsAgent.destroy();
+      httpAgent.destroy();
+      process.exit(0);
+    });
+  });
+}
