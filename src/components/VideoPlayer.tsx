@@ -103,9 +103,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   /**
-   * Cleanup timeout on unmount
+   * Start initial hide timer on mount
    */
   useEffect(() => {
+    // Start initial timer
+    handleMouseMove();
+
+    // Cleanup on unmount
     return () => {
       if (hideControlsTimeoutRef.current) {
         clearTimeout(hideControlsTimeoutRef.current);
@@ -921,11 +925,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
 
         .custom-video-controls.visible {
-          opacity: 1;
-        }
-
-        .video-player-wrapper:hover .custom-video-controls {
-          opacity: 1;
+          opacity: 1 !important;
         }
 
         .control-btn {
@@ -1004,11 +1004,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
 
         .keyboard-shortcuts.visible {
-          opacity: 1;
-        }
-
-        .video-player-wrapper:hover .keyboard-shortcuts {
-          opacity: 1;
+          opacity: 1 !important;
         }
 
         .shortcut-hint {
