@@ -103,6 +103,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   /**
+   * Toggle controls visibility on tap (for mobile)
+   */
+  const handleTapToggle = (e: React.MouseEvent | React.TouchEvent) => {
+    // Only toggle if tapping on video, not on controls
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'VIDEO' || target.classList.contains('video-player')) {
+      if (showControls) {
+        // If controls visible, hide them immediately
+        setShowControls(false);
+        if (hideControlsTimeoutRef.current) {
+          clearTimeout(hideControlsTimeoutRef.current);
+        }
+      } else {
+        // If controls hidden, show them
+        handleMouseMove();
+      }
+    }
+  };
+
+  /**
    * Start initial hide timer on mount
    */
   useEffect(() => {
@@ -160,6 +180,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen();
       setIsFullscreen(true);
+      // Force show controls when entering fullscreen
+      handleMouseMove();
     } else {
       document.exitFullscreen();
       setIsFullscreen(false);
@@ -171,7 +193,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
    */
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNowFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isNowFullscreen);
+
+      // Force show controls when entering fullscreen
+      if (isNowFullscreen) {
+        handleMouseMove();
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -367,6 +395,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           ref={containerRef}
           onMouseMove={handleMouseMove}
           onMouseEnter={handleMouseMove}
+          onTouchStart={handleMouseMove}
+          onTouchMove={handleMouseMove}
         >
           <div className="video-player">
             {videoUrl ? (
@@ -379,6 +409,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   key={videoUrl}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
+                  onClick={handleTapToggle}
+                  onTouchEnd={handleTapToggle}
                   style={{
                     width: "100%",
                     height: "100%",
@@ -1047,6 +1079,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         /* Fullscreen Mode Styles */
         .video-player-wrapper:fullscreen {
           background: black;
+          animation: fullscreenEnter 0.3s ease;
+        }
+
+        @keyframes fullscreenEnter {
+          from {
+            opacity: 0.8;
+          }
+          to {
+            opacity: 1;
+          }
         }
 
         .video-player-wrapper:fullscreen .video-player {
@@ -1065,6 +1107,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         .video-player-wrapper:fullscreen .custom-video-controls {
           bottom: 40px;
+          /* Ensure controls are visible in fullscreen initially */
+          animation: slideUpFade 0.3s ease;
+        }
+
+        @keyframes slideUpFade {
+          from {
+            opacity: 0;
+            transform: translate(-50%, 20px);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, 0);
+          }
         }
 
         .video-player-wrapper:fullscreen .keyboard-shortcuts {
