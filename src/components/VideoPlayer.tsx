@@ -952,6 +952,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         .control-btn:active {
           transform: scale(0.95);
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Touch feedback for mobile */
+        @media (hover: none) and (pointer: coarse) {
+          .control-btn {
+            border-width: 3px;
+          }
+
+          .control-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 255, 255, 0.4);
+          }
+
+          .play-pause-btn:active {
+            background: rgba(229, 9, 20, 0.5);
+          }
         }
 
         .play-pause-btn {
@@ -1209,21 +1226,102 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           .video-settings-btn,
           .video-close {
-            width: 36px;
-            height: 36px;
-            font-size: 1.125rem;
+            width: 44px;
+            height: 44px;
+            font-size: 1.25rem;
           }
 
-          /* Mobile Custom Controls */
+          /* Touch-friendly header buttons */
+          .video-header {
+            padding: 20px;
+          }
+
+          /* Mobile Custom Controls - Optimized for Touch */
           .custom-video-controls {
-            bottom: 100px;
-            padding: 12px 16px;
-            gap: 12px;
+            bottom: 80px;
+            padding: 16px 20px;
+            gap: 16px;
+            border-radius: 40px;
           }
 
           .control-btn {
-            width: 50px;
-            height: 50px;
+            width: 56px;
+            height: 56px;
+            border-width: 3px;
+          }
+
+          .play-pause-btn {
+            width: 72px;
+            height: 72px;
+            border-width: 3px;
+          }
+
+          .control-icon {
+            font-size: 1.5rem;
+          }
+
+          .play-pause-btn .control-icon {
+            font-size: 2.25rem;
+          }
+
+          .control-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+          }
+
+          .fullscreen-btn {
+            position: relative;
+            right: auto;
+            top: auto;
+            transform: none;
+            margin-left: 8px;
+            width: 56px;
+            height: 56px;
+          }
+
+          .fullscreen-btn .control-icon {
+            font-size: 1.75rem;
+          }
+
+          .keyboard-shortcuts {
+            display: none;
+          }
+
+          /* Fullscreen mode on mobile */
+          .video-player-wrapper:fullscreen .custom-video-controls {
+            bottom: 60px;
+            gap: 20px;
+            padding: 18px 24px;
+          }
+
+          .video-player-wrapper:fullscreen .control-btn {
+            width: 64px;
+            height: 64px;
+          }
+
+          .video-player-wrapper:fullscreen .play-pause-btn {
+            width: 80px;
+            height: 80px;
+          }
+
+          .video-player-wrapper:fullscreen .fullscreen-btn {
+            width: 64px;
+            height: 64px;
+          }
+        }
+
+        /* Landscape Mobile (iPhone, Android landscape) */
+        @media (max-width: 926px) and (orientation: landscape) {
+          .custom-video-controls {
+            bottom: 40px;
+            padding: 12px 16px;
+            gap: 14px;
+            border-radius: 35px;
+          }
+
+          .control-btn {
+            width: 48px;
+            height: 48px;
           }
 
           .play-pause-btn {
@@ -1243,21 +1341,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             font-size: 0.65rem;
           }
 
-          .fullscreen-btn {
-            right: 10px;
+          .keyboard-shortcuts {
+            display: none;
+          }
+        }
+
+        /* Tablet (iPad, Android Tablets) */
+        @media (min-width: 769px) and (max-width: 1024px) {
+          .custom-video-controls {
+            bottom: 70px;
+            padding: 14px 20px;
+            gap: 14px;
+          }
+
+          .control-btn {
+            width: 54px;
+            height: 54px;
+          }
+
+          .play-pause-btn {
+            width: 66px;
+            height: 66px;
           }
 
           .keyboard-shortcuts {
-            top: 10px;
-            right: 10px;
-            padding: 8px 12px;
-            font-size: 0.75rem;
+            top: 15px;
+            right: 15px;
+            padding: 10px 14px;
+          }
+
+          .shortcut-hint {
+            font-size: 0.8rem;
           }
 
           kbd {
-            padding: 2px 6px;
-            min-width: 28px;
-            font-size: 0.75rem;
+            padding: 3px 7px;
+            min-width: 30px;
+            font-size: 0.8rem;
           }
         }
       `}</style>
