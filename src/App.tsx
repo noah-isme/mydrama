@@ -17,7 +17,7 @@ import FavoritesPage from "./pages/FavoritesPage";
 import HistoryPage from "./pages/HistoryPage";
 import AuthPage from "./pages/AuthPage";
 import VideoPlayer from "./components/VideoPlayer";
-import { Message } from "./types";
+import { Message, VideoQuality } from "./types";
 
 function App() {
   // Video player state (shared across pages)
@@ -29,6 +29,7 @@ function App() {
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [maxEpisode, setMaxEpisode] = useState(100);
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoQualities, setVideoQualities] = useState<VideoQuality[]>([]);
   const [message, setMessage] = useState<Message>({ text: "", type: "info" });
 
   const API_BASE = "/api";
@@ -101,12 +102,16 @@ function App() {
   const loadEpisode = async (bookId: string, episode: number) => {
     try {
       setVideoUrl("");
+      setVideoQualities([]);
       showMessage(`⏳ Loading episode ${episode}...`, "info");
 
       const data = await fetchAPI("/stream", { bookId, episode });
 
       if (data.status && data.data && data.data.url) {
         setVideoUrl(data.data.url);
+        if (data.data.qualities && Array.isArray(data.data.qualities)) {
+          setVideoQualities(data.data.qualities);
+        }
         showMessage(`✅ Episode ${episode} loaded successfully!`, "success");
       } else if (data.url) {
         setVideoUrl(data.url);
@@ -223,6 +228,7 @@ function App() {
                 currentEpisode={currentEpisode}
                 maxEpisode={maxEpisode}
                 videoUrl={videoUrl}
+                qualities={videoQualities}
                 onEpisodeChange={changeEpisode}
                 onPrevious={previousEpisode}
                 onNext={nextEpisode}

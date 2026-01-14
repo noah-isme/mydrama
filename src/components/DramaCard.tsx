@@ -2,7 +2,7 @@
 // DramaCard Component - TypeScript Version with Enhanced Features
 // ============================================================================
 
-import React from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { Drama } from "../types";
 
 interface DramaCardProps {
@@ -17,6 +17,7 @@ interface DramaCardProps {
   onToggleFavorite?: (drama: Drama) => void;
   showProgress?: boolean;
   progress?: number;
+  enablePreview?: boolean;
 }
 
 const DramaCard: React.FC<DramaCardProps> = ({
@@ -26,10 +27,16 @@ const DramaCard: React.FC<DramaCardProps> = ({
   onToggleFavorite,
   showProgress = false,
   progress = 0,
+  enablePreview = true,
 }) => {
-  /**
-   * Format number to readable string (e.g., 1000 -> 1K, 1000000 -> 1M)
-   */
+  const [isHovered, setIsHovered] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchedRef = useRef(false);
+
   const formatNumber = (num?: number): string => {
     if (!num) return "0";
     if (num >= 1000000) {
@@ -41,9 +48,57 @@ const DramaCard: React.FC<DramaCardProps> = ({
     return num.toString();
   };
 
-  /**
-   * Handle card click
-   */
+  const fetchPreview = useCallback(async () => {
+    if (fetchedRef.current || previewUrl || !enablePreview) return;
+    
+    fetchedRef.current = true;
+    setPreviewLoading(true);
+    setPreviewError(false);
+    
+    try {
+      const response = await fetch(`/api/stream?bookId=${drama.bookId}&episode=1`);
+      const data = await response.json();
+      
+      if (data.status && data.data?.url) {
+        setPreviewUrl(data.data.url);
+      } else {
+        setPreviewError(true);
+      }
+    } catch {
+      setPreviewError(true);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [drama.bookId, previewUrl, enablePreview]);
+
+  const handleMouseEnter = useCallback(() => {
+    setIsHovered(true);
+    
+    if (enablePreview && !previewUrl && !previewError) {
+      hoverTimeoutRef.current = setTimeout(() => {
+        fetchPreview();
+      }, 800);
+    }
+    
+    if (previewUrl && videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [enablePreview, previewUrl, previewError, fetchPreview]);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsHovered(false);
+    
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    
+    if (videoRef.current) {
+      videoRef.current.pause();
+    }
+  }, []);
+
   const handleClick = () => {
     onSelect(
       drama.bookId,
@@ -53,9 +108,6 @@ const DramaCard: React.FC<DramaCardProps> = ({
     );
   };
 
-  /**
-   * Handle favorite toggle
-   */
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onToggleFavorite) {
@@ -78,13 +130,18 @@ const DramaCard: React.FC<DramaCardProps> = ({
   const rating = drama.score || (Math.random() * 2 + 3).toFixed(1);
 
   return (
-    <div className="drama-card" onClick={handleClick}>
+    <div 
+      className={`drama-card ${isHovered ? 'hovered' : ''}`} 
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <div className="drama-card-image-wrapper">
         {imgSrc && (
           <img
             src={imgSrc}
             alt={dramaName}
-            className="drama-card-image"
+            className={`drama-card-image ${previewUrl && isHovered ? 'hidden' : ''}`}
             loading="lazy"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = "none";
@@ -93,7 +150,24 @@ const DramaCard: React.FC<DramaCardProps> = ({
         )}
         {!imgSrc && <div className="drama-card-placeholder">🎬</div>}
 
-        {/* Favorite Button */}
+        {previewUrl && isHovered && (
+          <video
+            ref={videoRef}
+            src={previewUrl}
+            className="drama-card-preview"
+            muted
+            loop
+            playsInline
+            autoPlay
+          />
+        )}
+
+        {previewLoading && isHovered && (
+          <div className="drama-card-preview-loading">
+            <div className="preview-spinner"></div>
+          </div>
+        )}
+
         {onToggleFavorite && (
           <button
             className={`drama-card-favorite ${isFavorite ? "active" : ""}`}
@@ -130,6 +204,12 @@ const DramaCard: React.FC<DramaCardProps> = ({
             <span>📺</span>
             <span>{episodes} EP</span>
           </div>
+          {(drama.year || drama.releaseYear) && (
+            <div className="drama-card-meta-item">
+              <span>📅</span>
+              <span>{drama.year || drama.releaseYear}</span>
+            </div>
+          )}
           {viewsDisplay && (
             <div className="drama-card-meta-item">
               <span>👁️</span>
@@ -142,15 +222,21 @@ const DramaCard: React.FC<DramaCardProps> = ({
           </div>
         </div>
 
-        {drama.tags && drama.tags.length > 0 && (
+        {drama.status && (
+          <div className={`drama-card-status ${drama.status === 'completed' ? 'completed' : 'ongoing'}`}>
+            {drama.status === 'completed' ? '✓ Completed' : '◉ Ongoing'}
+          </div>
+        )}
+
+        {(drama.tags && drama.tags.length > 0) || (drama.genres && drama.genres.length > 0) ? (
           <div className="drama-card-tags">
-            {drama.tags.slice(0, 2).map((tag, index) => (
+            {(drama.genres || drama.tags || []).slice(0, 3).map((tag, index) => (
               <span key={index} className="drama-card-tag">
                 {tag}
               </span>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       <style>{`
@@ -184,6 +270,53 @@ const DramaCard: React.FC<DramaCardProps> = ({
           left: 0;
           width: 100%;
           height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .drama-card-image.hidden {
+          opacity: 0;
+        }
+
+        .drama-card-preview {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          z-index: 2;
+        }
+
+        .drama-card-preview-loading {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 3;
+        }
+
+        .preview-spinner {
+          width: 32px;
+          height: 32px;
+          border: 3px solid rgba(255, 255, 255, 0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        .drama-card.hovered .drama-card-overlay {
+          opacity: 0;
+        }
           object-fit: cover;
           transition: transform 0.3s ease;
         }
@@ -365,6 +498,25 @@ const DramaCard: React.FC<DramaCardProps> = ({
           font-size: 0.75rem;
           border-radius: 4px;
           font-weight: 500;
+        }
+
+        .drama-card-status {
+          font-size: 0.7rem;
+          font-weight: 600;
+          padding: 3px 8px;
+          border-radius: 4px;
+          display: inline-block;
+          margin-bottom: 6px;
+        }
+
+        .drama-card-status.completed {
+          background: rgba(16, 185, 129, 0.15);
+          color: #10B981;
+        }
+
+        .drama-card-status.ongoing {
+          background: rgba(59, 130, 246, 0.15);
+          color: #3B82F6;
         }
 
         @media (max-width: 768px) {

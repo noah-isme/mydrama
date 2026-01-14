@@ -10,12 +10,10 @@ export interface Drama {
   name?: string;
   bookName?: string;
   description?: string;
-  // Backend transformed fields
   cover?: string;
   verticalCover?: string;
   chapterNum?: number;
   viewNum?: number;
-  // Original API fields
   coverVerticalUrl?: string;
   coverHorizontalUrl?: string;
   coverWap?: string;
@@ -28,6 +26,19 @@ export interface Drama {
   author?: string;
   updateTime?: string;
   introduction?: string;
+  year?: number | string;
+  releaseYear?: number | string;
+  duration?: string;
+  episodeDuration?: string;
+  cast?: string[];
+  actors?: string[];
+  director?: string;
+  genre?: string;
+  genres?: string[];
+  country?: string;
+  language?: string;
+  status?: 'ongoing' | 'completed' | string;
+  rating?: number;
 }
 
 /**
@@ -41,13 +52,23 @@ export interface ApiResponse<T = any> {
 }
 
 /**
+ * Video quality option
+ */
+export interface VideoQuality {
+  url: string;
+  quality: string;
+  isDefault: boolean;
+  bitrate?: number | null;
+}
+
+/**
  * Video stream data
  */
 export interface StreamData {
   url: string;
   bookId: string;
   episode: number;
-  quality?: string;
+  qualities?: VideoQuality[];
 }
 
 /**
@@ -179,10 +200,12 @@ export interface VideoPlayerProps {
   currentEpisode: number;
   maxEpisode: number;
   videoUrl: string;
+  qualities?: VideoQuality[];
   onEpisodeChange: (episode: number) => void;
   onPrevious: () => void;
   onNext: () => void;
   onClose: () => void;
+  onQualityChange?: (quality: VideoQuality) => void;
 }
 
 export interface FilterBarProps {

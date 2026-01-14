@@ -2,12 +2,16 @@
 // VideoPlayer Component - TypeScript Version
 // ============================================================================
 
-import React, { useState, useRef, useEffect } from "react";
-import { VideoPlayerProps } from "../types";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { VideoPlayerProps, VideoQuality, Drama } from "../types";
+import { useWatchProgress, getWatchProgress } from "../hooks/useWatchProgress";
+import ShareClip from "./ShareClip";
+import WatchPartyOverlay from "./WatchPartyOverlay";
+import { useWatchParty } from "../hooks/useWatchParty";
 
 interface PlayerSettings {
   playbackSpeed: number;
-  quality: string;
+  selectedQuality: string;
   autoPlayNext: boolean;
   subtitles: boolean;
   volume: number;
@@ -18,10 +22,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   currentEpisode,
   maxEpisode,
   videoUrl,
+  qualities = [],
   onEpisodeChange,
   onPrevious,
   onNext,
   onClose,
+  onQualityChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,14 +35,115 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [isPiPActive, setIsPiPActive] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [resumePosition, setResumePosition] = useState(0);
   const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasCheckedResumeRef = useRef(false);
+  const [currentVideoUrl, setCurrentVideoUrl] = useState(videoUrl);
   const [settings, setSettings] = useState<PlayerSettings>({
     playbackSpeed: 1,
-    quality: "auto",
+    selectedQuality: "auto",
     autoPlayNext: true,
     subtitles: false,
     volume: 100,
   });
+
+  const handleWatchPartySync = useCallback((state: { time: number; playing: boolean }) => {
+    if (!videoRef.current) return;
+    const timeDiff = Math.abs(videoRef.current.currentTime - state.time);
+    if (timeDiff > 2) {
+      videoRef.current.currentTime = state.time;
+    }
+    if (state.playing && videoRef.current.paused) {
+      videoRef.current.play();
+    } else if (!state.playing && !videoRef.current.paused) {
+      videoRef.current.pause();
+    }
+  }, []);
+
+  const watchParty = useWatchParty(videoRef, handleWatchPartySync);
+
+  const availableQualities = useMemo(() => {
+    if (qualities.length > 0) {
+      return qualities;
+    }
+    return [{ url: videoUrl, quality: "auto", isDefault: true }];
+  }, [qualities, videoUrl]);
+
+  const handleQualityChange = (quality: VideoQuality) => {
+    const currentTime = videoRef.current?.currentTime || 0;
+    const wasPlaying = videoRef.current && !videoRef.current.paused;
+    
+    setCurrentVideoUrl(quality.url);
+    updateSetting("selectedQuality", quality.quality);
+    
+    if (onQualityChange) {
+      onQualityChange(quality);
+    }
+
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = currentTime;
+        if (wasPlaying) {
+          videoRef.current.play();
+        }
+      }
+    }, 100);
+  };
+
+  useEffect(() => {
+    setCurrentVideoUrl(videoUrl);
+  }, [videoUrl]);
+
+  useEffect(() => {
+    if (!currentDrama || hasCheckedResumeRef.current) return;
+    
+    const savedProgress = getWatchProgress(currentDrama.bookId);
+    if (savedProgress && savedProgress.episode === currentEpisode) {
+      if (savedProgress.percentage > 5 && savedProgress.percentage < 95) {
+        setResumePosition(savedProgress.position);
+        setShowResumePrompt(true);
+        hasCheckedResumeRef.current = true;
+      }
+    }
+  }, [currentDrama, currentEpisode]);
+
+  useEffect(() => {
+    hasCheckedResumeRef.current = false;
+    setShowResumePrompt(false);
+  }, [currentEpisode]);
+
+  const handleResume = useCallback(() => {
+    if (videoRef.current && resumePosition > 0) {
+      videoRef.current.currentTime = resumePosition;
+    }
+    setShowResumePrompt(false);
+  }, [resumePosition]);
+
+  const handleStartOver = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
+    setShowResumePrompt(false);
+  }, []);
+
+  const formatResumeTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const dramaForProgress: Drama = useMemo(() => ({
+    bookId: currentDrama.bookId,
+    name: currentDrama.name,
+    description: currentDrama.description,
+  }), [currentDrama]);
+
+  useWatchProgress(videoRef, currentDrama.bookId, currentEpisode, dramaForProgress);
 
   // Load settings from localStorage
   useEffect(() => {
@@ -225,6 +332,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else if (e.code === 'KeyF') {
         e.preventDefault();
         toggleFullscreen();
+      } else if (e.code === 'KeyP') {
+        e.preventDefault();
+        togglePiP();
       }
     };
 
@@ -239,11 +349,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
    */
   const handleControlAction = (action: () => void) => {
     action();
-    handleMouseMove(); // Reset hide timer
+    handleMouseMove();
   };
 
   const playbackSpeedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-  const qualityOptions = ["auto", "1080p", "720p", "480p", "360p"];
+
+  const togglePiP = async () => {
+    if (!videoRef.current) return;
+    
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPiPActive(false);
+      } else if (document.pictureInPictureEnabled) {
+        await videoRef.current.requestPictureInPicture();
+        setIsPiPActive(true);
+      }
+    } catch (error) {
+      console.error("PiP error:", error);
+    }
+  };
+
+  const isPiPSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document;
 
   return (
     <div className="video-section">
@@ -304,15 +431,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   Video Quality
                 </label>
                 <div className="settings-options">
-                  {qualityOptions.map((quality) => (
+                  {availableQualities.map((q) => (
                     <button
-                      key={quality}
+                      key={q.quality}
                       className={`settings-option-btn ${
-                        settings.quality === quality ? "active" : ""
+                        settings.selectedQuality === q.quality ? "active" : ""
                       }`}
-                      onClick={() => updateSetting("quality", quality)}
+                      onClick={() => handleQualityChange(q)}
                     >
-                      {quality}
+                      {q.quality}
                     </button>
                   ))}
                 </div>
@@ -399,16 +526,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onTouchMove={handleMouseMove}
         >
           <div className="video-player">
-            {videoUrl ? (
+            {currentVideoUrl ? (
               <>
                 <video
                   ref={videoRef}
                   controls
                   controlsList="nodownload"
                   autoPlay
-                  key={videoUrl}
+                  key={currentVideoUrl}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
+                  onLoadedMetadata={(e) => setVideoDuration((e.target as HTMLVideoElement).duration)}
+                  onTimeUpdate={(e) => setVideoCurrentTime((e.target as HTMLVideoElement).currentTime)}
                   onClick={handleTapToggle}
                   onTouchEnd={handleTapToggle}
                   style={{
@@ -417,9 +546,34 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     outline: "none",
                   }}
                 >
-                  <source src={videoUrl} type="video/mp4" />
+                  <source src={currentVideoUrl} type="video/mp4" />
                   Your browser does not support the video player.
                 </video>
+
+                {/* Resume Prompt */}
+                {showResumePrompt && (
+                  <div className="resume-prompt">
+                    <div className="resume-prompt-content">
+                      <span className="resume-prompt-text">
+                        Resume from {formatResumeTime(resumePosition)}?
+                      </span>
+                      <div className="resume-prompt-buttons">
+                        <button 
+                          className="resume-btn resume-yes"
+                          onClick={handleResume}
+                        >
+                          Resume
+                        </button>
+                        <button 
+                          className="resume-btn resume-no"
+                          onClick={handleStartOver}
+                        >
+                          Start Over
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Custom Video Controls Overlay */}
                 <div className={`custom-video-controls ${showControls ? 'visible' : ''}`}>
@@ -451,6 +605,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <span className="control-label">+10s</span>
                   </button>
 
+                  {isPiPSupported && (
+                    <button
+                      className={`control-btn pip-btn ${isPiPActive ? 'active' : ''}`}
+                      onClick={() => handleControlAction(togglePiP)}
+                      title="Picture in Picture (P)"
+                    >
+                      <span className="control-icon">
+                        {isPiPActive ? '📺' : '🖼️'}
+                      </span>
+                      <span className="control-label">PiP</span>
+                    </button>
+                  )}
+
+                  <button
+                    className="control-btn share-btn"
+                    onClick={() => {
+                      handleControlAction(() => setShowShareModal(true));
+                    }}
+                    title="Share Clip"
+                  >
+                    <span className="control-icon">📤</span>
+                    <span className="control-label">Share</span>
+                  </button>
+
                   <button
                     className="control-btn fullscreen-btn"
                     onClick={() => handleControlAction(toggleFullscreen)}
@@ -476,6 +654,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <div className="shortcut-hint">
                     <kbd>F</kbd> Fullscreen
                   </div>
+                  <div className="shortcut-hint">
+                    <kbd>P</kbd> PiP
+                  </div>
                 </div>
               </>
             ) : (
@@ -486,6 +667,34 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </div>
         </div>
+
+        {/* Share Clip Modal */}
+        {showShareModal && (
+          <ShareClip
+            bookId={currentDrama.bookId}
+            episode={currentEpisode}
+            dramaName={currentDrama.name}
+            currentTime={videoCurrentTime}
+            duration={videoDuration || 1}
+            onClose={() => setShowShareModal(false)}
+          />
+        )}
+
+        <WatchPartyOverlay
+          roomId={watchParty.roomId}
+          isLeader={watchParty.isLeader}
+          participantCount={watchParty.participantCount}
+          dramaName={watchParty.dramaName}
+          messages={watchParty.messages}
+          reactions={watchParty.reactions}
+          onCreateRoom={() => watchParty.createRoom(currentDrama.bookId, currentEpisode, currentDrama.name)}
+          onJoinRoom={watchParty.joinRoom}
+          onLeaveRoom={watchParty.leaveRoom}
+          onSendChat={watchParty.sendChat}
+          onSendReaction={watchParty.sendReaction}
+          isConnected={watchParty.isConnected}
+          error={watchParty.error}
+        />
 
         {/* Video Info Section */}
         <div className="video-info-section">
@@ -936,6 +1145,72 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         .loading-text {
           color: rgba(255, 255, 255, 0.7);
           font-size: 1rem;
+        }
+
+        .resume-prompt {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 150;
+          background: rgba(0, 0, 0, 0.9);
+          padding: 24px 32px;
+          border-radius: 16px;
+          backdrop-filter: blur(10px);
+          animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        .resume-prompt-content {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .resume-prompt-text {
+          color: white;
+          font-size: 1.1rem;
+          font-weight: 500;
+        }
+
+        .resume-prompt-buttons {
+          display: flex;
+          gap: 12px;
+        }
+
+        .resume-btn {
+          padding: 10px 24px;
+          border-radius: 8px;
+          font-size: 0.95rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          border: none;
+        }
+
+        .resume-yes {
+          background: var(--color-primary, #e50914);
+          color: white;
+        }
+
+        .resume-yes:hover {
+          background: #ff1a1a;
+          transform: scale(1.05);
+        }
+
+        .resume-no {
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .resume-no:hover {
+          background: rgba(255, 255, 255, 0.3);
         }
 
         /* Custom Video Controls */

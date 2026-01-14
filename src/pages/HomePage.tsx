@@ -2,12 +2,13 @@
 // Home Page Component
 // ============================================================================
 
-import React, { useState, useEffect } from "react";
-import { Drama, FilterOptions, Message } from "../types";
+import React, { useState, useEffect, useCallback } from "react";
+import { Drama, FilterOptions, Message, VideoQuality } from "../types";
 import Hero from "../components/Header";
 import DramaCard from "../components/DramaCard";
 import VideoPlayer from "../components/VideoPlayer";
 import FilterBar from "../components/FilterBar";
+import MoodDiscovery from "../components/MoodDiscovery";
 import { useFavorites } from "../hooks/useFavorites";
 import { useHistory } from "../hooks/useHistory";
 
@@ -26,6 +27,8 @@ const HomePage: React.FC<HomePageProps> = () => {
   const [showHero, setShowHero] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [activeFilters, setActiveFilters] = useState<FilterOptions>({});
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [moodDramas, setMoodDramas] = useState<Drama[]>([]);
 
   // Video player state
   const [currentDrama, setCurrentDrama] = useState<{
@@ -36,9 +39,10 @@ const HomePage: React.FC<HomePageProps> = () => {
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [maxEpisode, setMaxEpisode] = useState(100);
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoQualities, setVideoQualities] = useState<VideoQuality[]>([]);
 
   const { toggleFavorite, isFavorite } = useFavorites();
-  const { addToHistory } = useHistory();
+  const { addToHistory, continueWatching } = useHistory();
 
   const API_BASE = "/api";
 
@@ -253,12 +257,16 @@ const HomePage: React.FC<HomePageProps> = () => {
   const loadEpisode = async (bookId: string, episode: number) => {
     try {
       setVideoUrl("");
+      setVideoQualities([]);
       showMessage(`⏳ Memuat episode ${episode}...`, "info");
 
       const data = await fetchAPI("/stream", { bookId, episode });
 
       if (data.status && data.data && data.data.url) {
         setVideoUrl(data.data.url);
+        if (data.data.qualities && Array.isArray(data.data.qualities)) {
+          setVideoQualities(data.data.qualities);
+        }
         showMessage(`✅ Episode ${episode} berhasil dimuat!`, "success");
       } else if (data.url) {
         setVideoUrl(data.url);
@@ -333,6 +341,33 @@ const HomePage: React.FC<HomePageProps> = () => {
     const action = isFavorite(drama.bookId) ? "removed from" : "added to";
     showMessage(`✅ ${drama.name} ${action} favorites!`, "success");
   };
+
+  const handleMoodSelect = useCallback(async (mood: string) => {
+    setSelectedMood(mood);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`${API_BASE}/mood/${mood}`);
+      const data = await response.json();
+      
+      if (data.status && data.data) {
+        setMoodDramas(data.data);
+        setFilteredDramas(data.data);
+        setShowHero(false);
+        showMessage(`🎭 Found ${data.data.length} ${mood} dramas!`, "success");
+      }
+    } catch (error) {
+      showMessage("Failed to load mood recommendations", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [API_BASE]);
+
+  const clearMoodFilter = useCallback(() => {
+    setSelectedMood(null);
+    setMoodDramas([]);
+    setFilteredDramas(latestDramas);
+  }, [latestDramas]);
 
   // Load latest dramas on mount
   useEffect(() => {
@@ -444,6 +479,47 @@ const HomePage: React.FC<HomePageProps> = () => {
           />
         )}
 
+        {/* Mood Discovery */}
+        {!showHero && (
+          <MoodDiscovery 
+            onSelectMood={handleMoodSelect}
+            selectedMood={selectedMood}
+          />
+        )}
+
+        {/* Mood Filter Active Banner */}
+        {selectedMood && moodDramas.length > 0 && (
+          <div className="mood-active-banner">
+            <span>🎭 Showing {moodDramas.length} {selectedMood.replace('-', ' ')} dramas</span>
+            <button onClick={clearMoodFilter} className="btn btn-ghost btn-sm">
+              ✕ Clear
+            </button>
+          </div>
+        )}
+
+        {/* Continue Watching Section */}
+        {continueWatching.length > 0 && !showHero && (
+          <div className="section animate-fade-in-up" style={{ marginBottom: '2rem' }}>
+            <div className="section-header">
+              <h2 className="section-title">▶️ Continue Watching</h2>
+              <span className="text-muted">{continueWatching.length} in progress</span>
+            </div>
+            <div className="drama-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+              {continueWatching.slice(0, 6).map((item) => (
+                <DramaCard
+                  key={`continue-${item.drama.bookId}`}
+                  drama={item.drama}
+                  onSelect={selectDrama}
+                  isFavorite={isFavorite(item.drama.bookId)}
+                  onToggleFavorite={handleToggleFavorite}
+                  showProgress={true}
+                  progress={item.progress || 0}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Content Section */}
         <div className="section animate-fade-in-up">
           <div className="section-header">
@@ -544,6 +620,7 @@ const HomePage: React.FC<HomePageProps> = () => {
           currentEpisode={currentEpisode}
           maxEpisode={maxEpisode}
           videoUrl={videoUrl}
+          qualities={videoQualities}
           onEpisodeChange={changeEpisode}
           onPrevious={previousEpisode}
           onNext={nextEpisode}

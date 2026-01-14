@@ -5,12 +5,30 @@ import https from "https";
 import http from "http";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { WebSocketServer } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = 3000;
+const WS_PORT = 3001;
+
+const API_BASE = "https://dramabox.sansekai.my.id/api/dramabox";
+
+function normalizeFields(drama) {
+  return {
+    bookId: drama.bookId,
+    name: drama.bookName || drama.name,
+    cover: drama.coverWap || drama.cover,
+    verticalCover: drama.coverWap || drama.cover,
+    chapterNum: drama.chapterCount || drama.chapterNum || 0,
+    chapterCount: drama.chapterCount || 0,
+    viewNum: parseViewCount(drama.playCount || drama.viewNum || 0),
+    introduction: drama.introduction || "",
+    tags: drama.tags || drama.tagNames || [],
+  };
+}
 
 // Enhanced HTTPS/HTTP agents with proper keep-alive and timeout settings
 const httpsAgent = new https.Agent({
@@ -144,7 +162,23 @@ app.get("/latest", async (req, res) => {
     const response = await fetchWithRetry(
       "https://dramabox.sansekai.my.id/api/dramabox/latest",
     );
-    const data = await response.json();
+    const rawData = await response.json();
+    
+    if (rawData.error || rawData.message === "Error") {
+      console.error("❌ Upstream API error:", rawData.error || rawData.message);
+      return res.status(502).json({ 
+        status: false, 
+        message: "Upstream API is temporarily unavailable. Please try again later.",
+        upstream: rawData.error || rawData.message,
+      });
+    }
+    
+    const data = Array.isArray(rawData) ? rawData : (rawData.data || rawData.results || []);
+    
+    if (!Array.isArray(data) || data.length === 0) {
+      console.error("❌ Unexpected response format:", typeof rawData, Object.keys(rawData || {}));
+      return res.status(502).json({ status: false, message: "Unexpected API response format or empty data" });
+    }
 
     const dramas = data
       .map((item) => {
@@ -200,7 +234,21 @@ app.get("/search", async (req, res) => {
     const response = await fetchWithRetry(
       `https://dramabox.sansekai.my.id/api/dramabox/search?query=${encodeURIComponent(keyword)}`,
     );
-    const data = await response.json();
+    const rawData = await response.json();
+    
+    if (rawData.error || rawData.message === "Error") {
+      return res.status(502).json({ 
+        status: false, 
+        message: "Upstream API is temporarily unavailable",
+        upstream: rawData.error || rawData.message,
+      });
+    }
+    
+    const data = Array.isArray(rawData) ? rawData : (rawData.data || rawData.results || []);
+
+    if (!Array.isArray(data)) {
+      return res.json({ status: true, data: [] });
+    }
 
     const dramas = data.map((item) => ({
       bookId: item.bookId,
@@ -226,145 +274,119 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// STREAM ENDPOINT
+// Episode cache to avoid repeated API calls
+const episodeCache = new Map();
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+// STREAM ENDPOINT - Now uses /allepisode
 app.get("/stream", async (req, res) => {
   try {
     const { bookId, episode = 1 } = req.query;
+    const episodeNum = parseInt(episode);
+    
     if (!bookId) {
-      return res
-        .status(400)
-        .json({ status: false, message: "bookId required" });
+      return res.status(400).json({ status: false, message: "bookId required" });
     }
 
-    console.log(`🎬 Proxying stream: ${bookId} ep${episode}`);
-    const upstreamUrl = `https://dramabox.sansekai.my.id/api/dramabox/stream?bookId=${bookId}&episode=${episode}`;
-
-    const response = await fetchWithRetry(upstreamUrl);
-
-    // Check if response is ok
-    if (!response.ok) {
-      console.error(`❌ Upstream API returned ${response.status}: ${response.statusText}`);
-      console.error(`   URL: ${upstreamUrl}`);
-
-      // Try to get error details from response
-      let errorDetails = "Unknown error";
-      let errorData = null;
-      try {
+    console.log(`🎬 Proxying stream: ${bookId} ep${episodeNum}`);
+    
+    // Check cache first
+    const cacheKey = bookId;
+    const cached = episodeCache.get(cacheKey);
+    let allEpisodes;
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log(`📦 Using cached episodes for ${bookId}`);
+      allEpisodes = cached.data;
+    } else {
+      // Fetch all episodes
+      const upstreamUrl = `https://dramabox.sansekai.my.id/api/dramabox/allepisode?bookId=${bookId}`;
+      console.log(`🌐 Fetching all episodes from: ${upstreamUrl}`);
+      
+      const response = await fetchWithRetry(upstreamUrl);
+      
+      if (!response.ok) {
         const errorText = await response.text();
-        errorDetails = errorText;
-        console.error(`   Response: ${errorText.substring(0, 200)}`);
-
-        // Try to parse as JSON
-        try {
-          errorData = JSON.parse(errorText);
-        } catch (e) {
-          // Not JSON, keep as text
-        }
-      } catch (e) {
-        // Ignore parsing errors
-      }
-
-      // Check for rate limit error
-      if (errorData && (errorData.error || errorData.message)) {
-        const errorMsg = errorData.error || errorData.message || '';
-
-        if (errorMsg.includes('limit') || errorMsg.includes('tunggu')) {
-          console.warn(`⚠️  Rate limit detected: ${errorMsg}`);
+        console.error(`❌ Upstream API returned ${response.status}: ${errorText.substring(0, 200)}`);
+        
+        if (response.status === 429 || errorText.includes('limit') || errorText.includes('tunggu')) {
           return res.status(429).json({
             status: false,
-            message: 'Upstream API rate limit reached. Please wait a few minutes and try again.',
-            error: errorMsg,
-            retryAfter: 300, // 5 minutes
-            bookId,
-            episode,
-          });
-        }
-      }
-
-      return res.status(502).json({
-        status: false,
-        message: `Upstream API error: ${response.status} ${response.statusText}`,
-        details: errorDetails.substring(0, 500),
-        bookId,
-        episode,
-      });
-    }
-
-    const streamData = await response.json();
-
-    // Log response structure for debugging
-    console.log(`📊 Stream response structure:`, {
-      isArray: Array.isArray(streamData),
-      length: Array.isArray(streamData) ? streamData.length : 'N/A',
-      hasData: !!streamData,
-      keys: streamData ? Object.keys(streamData).slice(0, 5) : [],
-    });
-
-    // Parse video URL from response
-    let videoUrl = null;
-    let episodeInfo = null;
-
-    if (Array.isArray(streamData) && streamData.length > 0) {
-      const episodeData = streamData[0];
-      episodeInfo = {
-        hasCdnList: !!episodeData.cdnList,
-        cdnListLength: episodeData.cdnList?.length || 0,
-      };
-
-      if (
-        episodeData.cdnList &&
-        episodeData.cdnList[0] &&
-        episodeData.cdnList[0].videoPathList
-      ) {
-        const videos = episodeData.cdnList[0].videoPathList;
-        const defaultVideo = videos.find((v) => v.isDefault === 1) || videos[0];
-        videoUrl = defaultVideo?.videoPath;
-
-        console.log(`📹 Found ${videos.length} video qualities`);
-      } else {
-        console.warn(`⚠️  Episode data structure unexpected:`, episodeInfo);
-      }
-    } else if (streamData && typeof streamData === 'object') {
-      // Try alternative response structure
-      if (streamData.videoPath) {
-        videoUrl = streamData.videoPath;
-        console.log(`📹 Found video in alternative structure`);
-      } else if (streamData.url) {
-        videoUrl = streamData.url;
-        console.log(`📹 Found video URL in alternative structure`);
-      }
-    }
-
-    if (!videoUrl) {
-      console.error("❌ Could not extract video URL from response");
-      console.error("   Response structure:", JSON.stringify(streamData, null, 2).substring(0, 500));
-
-      // Check if response indicates an error
-      if (streamData && (streamData.error || streamData.message)) {
-        const errorMsg = streamData.error || streamData.message;
-        console.error("   API Error:", errorMsg);
-
-        if (errorMsg.includes('limit') || errorMsg.includes('tunggu')) {
-          return res.status(429).json({
-            status: false,
-            message: 'Upstream API rate limit reached. Please wait a few minutes and try again.',
-            error: errorMsg,
+            message: 'Upstream API rate limit. Please wait and try again.',
             retryAfter: 300,
-            bookId,
-            episode,
           });
         }
+        
+        return res.status(502).json({
+          status: false,
+          message: `Upstream API error: ${response.status}`,
+          bookId,
+          episode: episodeNum,
+        });
       }
-
+      
+      allEpisodes = await response.json();
+      
+      if (allEpisodes.error || allEpisodes.message === "Error") {
+        console.error(`❌ Upstream returned error:`, allEpisodes);
+        return res.status(502).json({
+          status: false,
+          message: allEpisodes.error || "Upstream API error",
+          bookId,
+          episode: episodeNum,
+        });
+      }
+      
+      if (!Array.isArray(allEpisodes) || allEpisodes.length === 0) {
+        return res.status(404).json({
+          status: false,
+          message: "No episodes found for this drama",
+          bookId,
+        });
+      }
+      
+      // Cache the result
+      episodeCache.set(cacheKey, { data: allEpisodes, timestamp: Date.now() });
+      console.log(`✅ Cached ${allEpisodes.length} episodes for ${bookId}`);
+    }
+    
+    // Find the requested episode (chapterIndex is 0-based, episode is 1-based)
+    const episodeData = allEpisodes.find(ep => ep.chapterIndex === episodeNum - 1);
+    
+    if (!episodeData) {
       return res.status(404).json({
         status: false,
-        message: "Video URL not found in upstream response. The drama might not be available or episode doesn't exist.",
-        debug: {
-          bookId,
-          episode,
-          responseType: Array.isArray(streamData) ? 'array' : typeof streamData,
-          responseKeys: streamData ? Object.keys(streamData).slice(0, 10) : [],
-        },
+        message: `Episode ${episodeNum} not found. Available: 1-${allEpisodes.length}`,
+        bookId,
+        episode: episodeNum,
+        totalEpisodes: allEpisodes.length,
+      });
+    }
+    
+    // Extract video URLs
+    let videoUrl = null;
+    let qualities = [];
+    
+    if (episodeData.cdnList && episodeData.cdnList[0]?.videoPathList) {
+      const videos = episodeData.cdnList[0].videoPathList;
+      const defaultVideo = videos.find(v => v.isDefault === 1) || videos[0];
+      videoUrl = defaultVideo?.videoPath;
+      
+      qualities = videos.map(v => ({
+        url: v.videoPath,
+        quality: v.quality ? `${v.quality}p` : 'unknown',
+        isDefault: v.isDefault === 1,
+      })).filter(q => q.url);
+      
+      console.log(`📹 Found ${qualities.length} qualities: ${qualities.map(q => q.quality).join(', ')}`);
+    }
+    
+    if (!videoUrl) {
+      return res.status(404).json({
+        status: false,
+        message: "Video URL not found for this episode",
+        bookId,
+        episode: episodeNum,
       });
     }
 
@@ -373,21 +395,159 @@ app.get("/stream", async (req, res) => {
       status: true,
       data: {
         url: videoUrl,
-        episode: parseInt(episode),
+        qualities,
+        episode: episodeNum,
         bookId,
+        totalEpisodes: allEpisodes.length,
+        episodeName: episodeData.chapterName,
       },
     });
   } catch (error) {
     console.error("❌ Error:", error.message);
-    console.error("   Stack:", error.stack?.split('\n').slice(0, 3).join('\n'));
-
     res.status(500).json({
       status: false,
       message: error.message,
-      error: process.env.NODE_ENV === "development" ? error.stack : undefined,
       bookId: req.query.bookId,
       episode: req.query.episode || 1,
     });
+  }
+});
+
+const MOOD_MAPPINGS = {
+  'feel-good': ['romance', 'comedy', 'slice-of-life', 'family', 'heartwarming'],
+  'edge-of-seat': ['thriller', 'action', 'mystery', 'crime', 'suspense'],
+  'tearjerker': ['melodrama', 'tragedy', 'romance', 'drama', 'emotional'],
+  'mind-bender': ['sci-fi', 'mystery', 'psychological', 'fantasy', 'supernatural'],
+};
+
+app.get("/trending", async (req, res) => {
+  try {
+    console.log("📊 Trending request received");
+    
+    const response = await fetchWithRetry(`${API_BASE}/latest`);
+    const rawData = await response.json();
+    
+    if (rawData.error || rawData.message === "Error") {
+      return res.status(502).json({ status: false, message: "Upstream API unavailable" });
+    }
+    
+    const data = Array.isArray(rawData) ? rawData : (rawData.data || rawData.results || []);
+    
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ status: true, data: [] });
+    }
+
+    const scored = data.map((d) => ({
+      ...normalizeFields(d),
+      trendingScore: parseViewCount(d.playCount || d.viewNum || d.view || 0),
+    }));
+
+    scored.sort((a, b) => b.trendingScore - a.trendingScore);
+
+    console.log(`✅ Trending: returning ${scored.length} dramas`);
+    res.json({ status: true, data: scored.slice(0, 20) });
+  } catch (error) {
+    console.error("❌ Trending error:", error.message);
+    res.status(500).json({ status: false, message: error.message });
+  }
+});
+
+app.get("/recommendations", async (req, res) => {
+  const { bookId } = req.query;
+  
+  if (!bookId) {
+    return res.status(400).json({ status: false, message: "bookId is required" });
+  }
+
+  try {
+    console.log(`🎯 Recommendations request for bookId: ${bookId}`);
+    
+    const response = await fetchWithRetry(`${API_BASE}/latest`);
+    const rawData = await response.json();
+    
+    if (rawData.error || rawData.message === "Error") {
+      return res.status(502).json({ status: false, message: "Upstream API unavailable" });
+    }
+    
+    const data = Array.isArray(rawData) ? rawData : (rawData.data || rawData.results || []);
+    
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ status: true, data: [] });
+    }
+
+    const sourceDrama = data.find((d) => d.bookId === bookId);
+    if (!sourceDrama) {
+      return res.status(404).json({ status: false, message: "Drama not found" });
+    }
+
+    const sourceTags = new Set(
+      (sourceDrama.tags || []).map((t) => t.toLowerCase())
+    );
+
+    const recommendations = data
+      .filter((d) => d.bookId !== bookId)
+      .map((d) => {
+        const dramaTags = new Set((d.tags || []).map((t) => t.toLowerCase()));
+        const matchedTags = [...sourceTags].filter((t) => dramaTags.has(t)).length;
+        const similarity = sourceTags.size > 0 
+          ? matchedTags / Math.max(sourceTags.size, dramaTags.size)
+          : 0;
+        
+        return { ...normalizeFields(d), similarity };
+      })
+      .filter((d) => d.similarity > 0.1)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 10);
+
+    console.log(`✅ Recommendations: found ${recommendations.length} similar dramas`);
+    res.json({
+      status: true,
+      data: recommendations,
+      source: { bookId, name: sourceDrama.bookName || sourceDrama.name },
+    });
+  } catch (error) {
+    console.error("❌ Recommendations error:", error.message);
+    res.status(500).json({ status: false, message: error.message });
+  }
+});
+
+app.get("/mood/:mood", async (req, res) => {
+  const { mood } = req.params;
+  const moodTags = MOOD_MAPPINGS[mood];
+
+  if (!moodTags) {
+    return res.status(400).json({
+      status: false,
+      message: `Invalid mood. Options: ${Object.keys(MOOD_MAPPINGS).join(", ")}`,
+    });
+  }
+
+  try {
+    console.log(`🎭 Mood request: ${mood}`);
+    
+    const response = await fetchWithRetry(`${API_BASE}/latest`);
+    const rawData = await response.json();
+    
+    if (rawData.error || rawData.message === "Error") {
+      return res.status(502).json({ status: false, message: "Upstream API unavailable" });
+    }
+    
+    const data = Array.isArray(rawData) ? rawData : (rawData.data || rawData.results || []);
+    
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ status: true, data: [], mood });
+    }
+
+    const moodDramas = data.filter((d) => {
+      const dramaTags = (d.tags || []).map((t) => t.toLowerCase());
+      return moodTags.some((mt) => dramaTags.some((dt) => dt.includes(mt)));
+    }).map(normalizeFields);
+
+    console.log(`✅ Mood ${mood}: found ${moodDramas.length} dramas`);
+    res.json({ status: true, data: moodDramas, mood });
+  } catch (error) {
+    console.error("❌ Mood error:", error.message);
+    res.status(500).json({ status: false, message: error.message });
   }
 });
 
@@ -436,4 +596,138 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       process.exit(0);
     });
   });
+
+  const wss = new WebSocketServer({ port: WS_PORT });
+  const watchPartyRooms = new Map();
+
+  wss.on("connection", (ws) => {
+    let currentRoom = null;
+    let isLeader = false;
+    let participantId = Math.random().toString(36).substring(7);
+
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        switch (msg.type) {
+          case "create_room": {
+            const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+            watchPartyRooms.set(roomId, {
+              leader: ws,
+              leaderId: participantId,
+              participants: new Map([[participantId, { ws, name: msg.name || "Host" }]]),
+              videoState: { bookId: msg.bookId, episode: msg.episode, time: 0, playing: false },
+              dramaName: msg.dramaName || "Unknown Drama",
+            });
+            currentRoom = roomId;
+            isLeader = true;
+            ws.send(JSON.stringify({ type: "room_created", roomId, isLeader: true, participantId }));
+            break;
+          }
+
+          case "join_room": {
+            const room = watchPartyRooms.get(msg.roomId);
+            if (!room) {
+              ws.send(JSON.stringify({ type: "error", message: "Room not found" }));
+              return;
+            }
+            room.participants.set(participantId, { ws, name: msg.name || "Guest" });
+            currentRoom = msg.roomId;
+
+            ws.send(JSON.stringify({
+              type: "room_joined",
+              roomId: msg.roomId,
+              isLeader: false,
+              participantId,
+              videoState: room.videoState,
+              dramaName: room.dramaName,
+              participantCount: room.participants.size,
+            }));
+
+            broadcastToRoom(room, {
+              type: "participant_joined",
+              name: msg.name || "Guest",
+              count: room.participants.size,
+            }, participantId);
+            break;
+          }
+
+          case "sync": {
+            if (!currentRoom || !isLeader) return;
+            const room = watchPartyRooms.get(currentRoom);
+            if (!room) return;
+
+            room.videoState = { ...room.videoState, ...msg.state };
+            broadcastToRoom(room, { type: "sync", state: room.videoState, from: "leader" }, participantId);
+            break;
+          }
+
+          case "chat": {
+            if (!currentRoom) return;
+            const room = watchPartyRooms.get(currentRoom);
+            if (!room) return;
+
+            const participant = room.participants.get(participantId);
+            broadcastToRoom(room, {
+              type: "chat",
+              message: msg.message,
+              name: participant?.name || "Anonymous",
+              timestamp: Date.now(),
+            });
+            break;
+          }
+
+          case "reaction": {
+            if (!currentRoom) return;
+            const room = watchPartyRooms.get(currentRoom);
+            if (!room) return;
+
+            broadcastToRoom(room, { type: "reaction", emoji: msg.emoji, participantId });
+            break;
+          }
+
+          case "leave_room": {
+            handleLeave();
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("WebSocket message error:", e);
+      }
+    });
+
+    ws.on("close", handleLeave);
+
+    function handleLeave() {
+      if (!currentRoom) return;
+      const room = watchPartyRooms.get(currentRoom);
+      if (!room) return;
+
+      room.participants.delete(participantId);
+
+      if (room.participants.size === 0) {
+        watchPartyRooms.delete(currentRoom);
+      } else if (isLeader) {
+        const [[newLeaderId, newLeader]] = room.participants.entries();
+        room.leader = newLeader.ws;
+        room.leaderId = newLeaderId;
+        newLeader.ws.send(JSON.stringify({ type: "promoted_to_leader" }));
+        broadcastToRoom(room, { type: "leader_changed", newLeaderName: newLeader.name });
+      }
+
+      broadcastToRoom(room, { type: "participant_left", count: room.participants.size }, participantId);
+      currentRoom = null;
+    }
+
+    function broadcastToRoom(room, message, excludeId = null) {
+      const msgStr = JSON.stringify(message);
+      room.participants.forEach((p, id) => {
+        if (id !== excludeId && p.ws.readyState === 1) {
+          p.ws.send(msgStr);
+        }
+      });
+    }
+  });
+
+  console.log(`🎉 Watch Party WebSocket: ws://localhost:${WS_PORT}`);
 }
