@@ -108,4 +108,19 @@ export class HomePage extends BasePage {
     const bookId = await firstCard.getAttribute('data-book-id') || '';
     return { title: title.trim(), bookId };
   }
+
+  async getDramaTitles(): Promise<string[]> {
+    return this.dramaCards.locator('.drama-card-title').allTextContents();
+  }
+
+  async expectDramaTitle(title: string) {
+    const titles = await this.getDramaTitles();
+    const hasTitle = titles.some(t => t.toLowerCase().includes(title.toLowerCase()));
+    expect(hasTitle).toBeTruthy();
+  }
+
+  async expectEmptyState() {
+    await expect(this.page.locator('.empty-state')).toBeVisible();
+    await expect(this.page.locator('.empty-title')).toBeVisible();
+  }
 }

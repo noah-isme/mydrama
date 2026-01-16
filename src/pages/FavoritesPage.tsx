@@ -3,6 +3,7 @@
 // ============================================================================
 
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { useFavorites } from "../hooks/useFavorites";
 import { useHistory } from "../hooks/useHistory";
 import DramaCard from "../components/DramaCard";
@@ -104,7 +105,13 @@ const FavoritesPage: React.FC<FavoritesPageProps> = ({ onSelectDrama }) => {
   const sortedFavorites = getSortedFavorites();
 
   return (
-    <div className="favorites-page">
+    <motion.div 
+      className="favorites-page"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       {/* Message Toast */}
       {message.text && (
         <div className="message-container">
@@ -404,7 +411,7 @@ const FavoritesPage: React.FC<FavoritesPageProps> = ({ onSelectDrama }) => {
           }
         }
       `}</style>
-    </div>
+    </motion.div>
   );
 };
 

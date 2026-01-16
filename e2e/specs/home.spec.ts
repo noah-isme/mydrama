@@ -22,8 +22,15 @@ test.describe('Home Page - Drama Discovery', () => {
   });
 
   test('should search dramas by keyword', async ({ homePage }) => {
-    await homePage.searchDrama('love');
+    await homePage.searchDrama('Test Drama 1');
     await expect(homePage.searchTab).toHaveClass(/active/);
+    await homePage.expectDramaCount(1);
+    await homePage.expectDramaTitle('Test Drama 1');
+  });
+
+  test('should show empty state for invalid search', async ({ homePage }) => {
+    await homePage.searchDrama('NonExistentDrama123');
+    await homePage.expectEmptyState();
   });
 
   test('should search dramas by pressing Enter', async ({ homePage }) => {

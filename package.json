@@ -20,14 +20,19 @@
     "test:e2e:webkit": "playwright test --project=webkit"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.90.18",
     "axios": "^1.12.0",
+    "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "express": "^4.22.1",
+    "framer-motion": "^12.26.2",
     "localforage": "^1.10.0",
+    "lucide-react": "^0.562.0",
     "node-fetch": "^3.3.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.1",
+    "tailwind-merge": "^3.4.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {

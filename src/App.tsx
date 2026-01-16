@@ -4,11 +4,12 @@
 
 import { useState } from "react";
 import {
-  BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AuthProvider } from "./contexts/AuthContext";
 import Navbar from "./components/Navbar";
@@ -16,10 +17,11 @@ import HomePage from "./pages/HomePage";
 import FavoritesPage from "./pages/FavoritesPage";
 import HistoryPage from "./pages/HistoryPage";
 import AuthPage from "./pages/AuthPage";
+import ProfilePage from "./pages/ProfilePage";
 import VideoPlayer from "./components/VideoPlayer";
-import { Message, VideoQuality } from "./types";
 
 function App() {
+  const location = useLocation();
   // Video player state (shared across pages)
   const [currentDrama, setCurrentDrama] = useState<{
     bookId: string;
@@ -28,62 +30,7 @@ function App() {
   } | null>(null);
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [maxEpisode, setMaxEpisode] = useState(100);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoQualities, setVideoQualities] = useState<VideoQuality[]>([]);
-  const [message, setMessage] = useState<Message>({ text: "", type: "info" });
 
-  const API_BASE = "/api";
-
-  /**
-   * Show message with auto-hide
-   */
-  const showMessage = (text: string, type: Message["type"] = "info") => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: "", type: "info" }), 5000);
-  };
-
-  /**
-   * Fetch API helper
-   */
-  const fetchAPI = async (
-    endpoint: string,
-    params: Record<string, any> = {},
-  ) => {
-    const queryString = new URLSearchParams(params).toString();
-    const url = `${API_BASE}${endpoint}${queryString ? "?" + queryString : ""}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (Array.isArray(data)) {
-      return { status: true, data: data };
-    }
-
-    if (data.status !== undefined) {
-      return data;
-    }
-
-    if (data.url) {
-      return { status: true, data: data };
-    }
-
-    return { status: true, data: data };
-  };
-
-  /**
-   * Handle drama selection (play video)
-   */
   const handleSelectDrama = async (
     bookId: string,
     name: string,
@@ -93,35 +40,6 @@ function App() {
     setCurrentDrama({ bookId, name, description });
     setCurrentEpisode(1);
     setMaxEpisode(totalEpisodes || 100);
-    await loadEpisode(bookId, 1);
-  };
-
-  /**
-   * Load episode
-   */
-  const loadEpisode = async (bookId: string, episode: number) => {
-    try {
-      setVideoUrl("");
-      setVideoQualities([]);
-      showMessage(`⏳ Loading episode ${episode}...`, "info");
-
-      const data = await fetchAPI("/stream", { bookId, episode });
-
-      if (data.status && data.data && data.data.url) {
-        setVideoUrl(data.data.url);
-        if (data.data.qualities && Array.isArray(data.data.qualities)) {
-          setVideoQualities(data.data.qualities);
-        }
-        showMessage(`✅ Episode ${episode} loaded successfully!`, "success");
-      } else if (data.url) {
-        setVideoUrl(data.url);
-        showMessage(`✅ Episode ${episode} loaded successfully!`, "success");
-      } else {
-        throw new Error("Streaming link not found");
-      }
-    } catch (error: any) {
-      showMessage("❌ Failed to load episode: " + error.message, "error");
-    }
   };
 
   /**
@@ -130,7 +48,6 @@ function App() {
   const changeEpisode = (newEpisode: number) => {
     if (newEpisode >= 1 && newEpisode <= maxEpisode && currentDrama) {
       setCurrentEpisode(newEpisode);
-      loadEpisode(currentDrama.bookId, newEpisode);
     }
   };
 
@@ -157,48 +74,26 @@ function App() {
    */
   const closeVideoPlayer = () => {
     setCurrentDrama(null);
-    setVideoUrl("");
   };
 
   /**
    * Handle search from navbar
    */
-  const handleNavbarSearch = (_query: string) => {
-    // This will be handled by the HomePage component
-    window.location.hash = "#search";
+  const handleNavbarSearch = (query: string) => {
+    window.location.href = `/?q=${encodeURIComponent(query)}`;
   };
 
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Router>
-          <div className="app-container">
-            {/* Global Message Toast */}
-            {message.text && (
-              <div className="message-container">
-                <div className={`message ${message.type}`}>
-                  <div className="message-icon">
-                    {message.type === "success"
-                      ? "✅"
-                      : message.type === "error"
-                        ? "❌"
-                        : message.type === "warning"
-                          ? "⚠️"
-                          : "ℹ️"}
-                  </div>
-                  <div className="message-content">
-                    <div className="message-text">{message.text}</div>
-                  </div>
-                </div>
-              </div>
-            )}
+        <div className="app-container">
+          {/* Navigation Bar */}
+          <Navbar onSearch={handleNavbarSearch} />
 
-            {/* Navigation Bar */}
-            <Navbar onSearch={handleNavbarSearch} />
-
-            {/* Main Content Routes */}
-            <div className="main-content">
-              <Routes>
+          {/* Main Content Routes */}
+          <div className="main-content">
+            <AnimatePresence mode="wait">
+              <Routes location={location} key={location.pathname}>
                 <Route
                   path="/"
                   element={<HomePage onSearch={handleNavbarSearch} />}
@@ -217,26 +112,25 @@ function App() {
                     <AuthPage onSuccess={() => (window.location.href = "/")} />
                   }
                 />
+                <Route path="/profile" element={<ProfilePage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
-            </div>
-
-            {/* Video Player Modal (Global) */}
-            {currentDrama && (
-              <VideoPlayer
-                currentDrama={currentDrama}
-                currentEpisode={currentEpisode}
-                maxEpisode={maxEpisode}
-                videoUrl={videoUrl}
-                qualities={videoQualities}
-                onEpisodeChange={changeEpisode}
-                onPrevious={previousEpisode}
-                onNext={nextEpisode}
-                onClose={closeVideoPlayer}
-              />
-            )}
+            </AnimatePresence>
           </div>
-        </Router>
+
+          {/* Video Player Modal (Global) */}
+          {currentDrama && (
+            <VideoPlayer
+              currentDrama={currentDrama}
+              currentEpisode={currentEpisode}
+              maxEpisode={maxEpisode}
+              onEpisodeChange={changeEpisode}
+              onPrevious={previousEpisode}
+              onNext={nextEpisode}
+              onClose={closeVideoPlayer}
+            />
+          )}
+        </div>
       </AuthProvider>
     </ThemeProvider>
   );

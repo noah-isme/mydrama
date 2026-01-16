@@ -20,6 +20,19 @@ export class BasePage {
     this.navbar = page.getByTestId('navbar');
     this.messageToast = page.locator('.message-container');
     this.loadingSpinner = page.locator('.loading-spinner');
+    this.navbarSearchInput = page.locator('.navbar-search .search-input');
+    this.navbarSearchButton = page.locator('.navbar-search .search-button');
+    this.themeToggle = page.locator('.theme-toggle');
+  }
+
+  readonly navbarSearchInput: Locator;
+  readonly navbarSearchButton: Locator;
+  readonly themeToggle: Locator;
+
+  async searchViaNavbar(query: string) {
+    await this.navbarSearchInput.fill(query);
+    await this.navbarSearchButton.click();
+    await this.waitForLoading();
   }
 
   /**

@@ -149,6 +149,13 @@ const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
                   </div>
                   <div className="dropdown-divider"></div>
                   <Link
+                    to="/profile"
+                    className="dropdown-item"
+                    onClick={() => setShowUserMenu(false)}
+                  >
+                    👤 Profile
+                  </Link>
+                  <Link
                     to="/favorites"
                     className="dropdown-item"
                     onClick={() => setShowUserMenu(false)}

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { useHistory } from "../hooks/useHistory";
 import { useFavorites } from "../hooks/useFavorites";
 import DramaCard from "../components/DramaCard";
@@ -113,7 +114,13 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onSelectDrama }) => {
   const displayHistory = getDisplayHistory();
 
   return (
-    <div className="history-page">
+    <motion.div 
+      className="history-page"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       {/* Message Toast */}
       {message.text && (
         <div className="message-container">
@@ -559,7 +566,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onSelectDrama }) => {
           }
         }
       `}</style>
-    </div>
+    </motion.div>
   );
 };
 

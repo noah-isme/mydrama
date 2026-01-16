@@ -8,6 +8,7 @@ import { useWatchProgress, getWatchProgress } from "../hooks/useWatchProgress";
 import ShareClip from "./ShareClip";
 import WatchPartyOverlay from "./WatchPartyOverlay";
 import { useWatchParty } from "../hooks/useWatchParty";
+import { useDramaStream } from "../hooks/useDramas";
 
 interface PlayerSettings {
   playbackSpeed: number;
@@ -29,6 +30,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onClose,
   onQualityChange,
 }) => {
+  const { data: streamData } = useDramaStream(
+    !videoUrl ? currentDrama.bookId : "",
+    !videoUrl ? currentEpisode : 0
+  );
+
+  const activeVideoUrl = videoUrl || streamData?.url || "";
+
+  const activeQualities = qualities.length > 0 ? qualities : (streamData?.qualities || []);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -43,7 +53,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [resumePosition, setResumePosition] = useState(0);
   const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasCheckedResumeRef = useRef(false);
-  const [currentVideoUrl, setCurrentVideoUrl] = useState(videoUrl);
+  const [currentVideoUrl, setCurrentVideoUrl] = useState(activeVideoUrl);
   const [settings, setSettings] = useState<PlayerSettings>({
     playbackSpeed: 1,
     selectedQuality: "auto",
@@ -68,11 +78,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const watchParty = useWatchParty(videoRef, handleWatchPartySync);
 
   const availableQualities = useMemo(() => {
-    if (qualities.length > 0) {
-      return qualities;
+    if (activeQualities.length > 0) {
+      return activeQualities;
     }
-    return [{ url: videoUrl, quality: "auto", isDefault: true }];
-  }, [qualities, videoUrl]);
+    return [{ url: activeVideoUrl, quality: "auto", isDefault: true }];
+  }, [activeQualities, activeVideoUrl]);
 
   const handleQualityChange = (quality: VideoQuality) => {
     const currentTime = videoRef.current?.currentTime || 0;
@@ -96,8 +106,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   useEffect(() => {
-    setCurrentVideoUrl(videoUrl);
-  }, [videoUrl]);
+    if (activeVideoUrl) {
+      setCurrentVideoUrl(activeVideoUrl);
+    }
+  }, [activeVideoUrl]);
 
   useEffect(() => {
     if (!currentDrama || hasCheckedResumeRef.current) return;
@@ -164,7 +176,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.playbackRate = settings.playbackSpeed;
       videoRef.current.volume = settings.volume / 100;
     }
-  }, [settings.playbackSpeed, settings.volume, videoUrl]);
+  }, [settings.playbackSpeed, settings.volume, activeVideoUrl]);
 
   if (!currentDrama) return null;
 

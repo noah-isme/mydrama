@@ -199,7 +199,7 @@ export interface VideoPlayerProps {
   };
   currentEpisode: number;
   maxEpisode: number;
-  videoUrl: string;
+  videoUrl?: string;
   qualities?: VideoQuality[];
   onEpisodeChange: (episode: number) => void;
   onPrevious: () => void;

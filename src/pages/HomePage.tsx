@@ -2,8 +2,10 @@
 // Home Page Component
 // ============================================================================
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Drama, FilterOptions, Message, VideoQuality } from "../types";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
+import { motion, AnimatePresence, Variants } from "framer-motion";
+import { Drama, FilterOptions, Message } from "../types";
 import Hero from "../components/Header";
 import DramaCard from "../components/DramaCard";
 import VideoPlayer from "../components/VideoPlayer";
@@ -11,24 +13,43 @@ import FilterBar from "../components/FilterBar";
 import MoodDiscovery from "../components/MoodDiscovery";
 import { useFavorites } from "../hooks/useFavorites";
 import { useHistory } from "../hooks/useHistory";
+import { useLatestDramas, useSearchDramas, useMoodDramas } from "../hooks/useDramas";
 
 interface HomePageProps {
   onSearch?: (keyword: string) => void;
 }
 
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1,
+    },
+  },
+};
+
+const itemVariants: Variants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      type: "spring",
+      stiffness: 100,
+    },
+  },
+};
+
 const HomePage: React.FC<HomePageProps> = () => {
   const [activeTab, setActiveTab] = useState<"latest" | "search">("latest");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [latestDramas, setLatestDramas] = useState<Drama[]>([]);
-  const [searchResults, setSearchResults] = useState<Drama[]>([]);
-  const [filteredDramas, setFilteredDramas] = useState<Drama[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [message, setMessage] = useState<Message>({ text: "", type: "info" });
   const [showHero, setShowHero] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [activeFilters, setActiveFilters] = useState<FilterOptions>({});
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
-  const [moodDramas, setMoodDramas] = useState<Drama[]>([]);
 
   // Video player state
   const [currentDrama, setCurrentDrama] = useState<{
@@ -38,126 +59,35 @@ const HomePage: React.FC<HomePageProps> = () => {
   } | null>(null);
   const [currentEpisode, setCurrentEpisode] = useState(1);
   const [maxEpisode, setMaxEpisode] = useState(100);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoQualities, setVideoQualities] = useState<VideoQuality[]>([]);
 
   const { toggleFavorite, isFavorite } = useFavorites();
   const { addToHistory, continueWatching } = useHistory();
+  const [searchParams] = useSearchParams();
 
-  const API_BASE = "/api";
+  const { 
+    data: latestDramas = [], 
+    isLoading: isLoadingLatest, 
+    refetch: refetchLatest 
+  } = useLatestDramas();
 
-  /**
-   * Show message with auto-hide
-   */
+  const { 
+    data: searchResults = [], 
+    isLoading: isLoadingSearch 
+  } = useSearchDramas(submittedQuery);
+
+  const { 
+    data: moodResults = [], 
+    isLoading: isLoadingMood 
+  } = useMoodDramas(selectedMood);
+
+  const loading = isLoadingLatest || isLoadingSearch || isLoadingMood;
+
   const showMessage = (text: string, type: Message["type"] = "error") => {
     setMessage({ text, type });
     setTimeout(() => setMessage({ text: "", type: "info" }), 5000);
   };
 
-  /**
-   * Fetch API helper
-   */
-  const fetchAPI = async (
-    endpoint: string,
-    params: Record<string, any> = {},
-  ) => {
-    const queryString = new URLSearchParams(params).toString();
-    const url = `${API_BASE}${endpoint}${queryString ? "?" + queryString : ""}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (Array.isArray(data)) {
-      return { status: true, data: data };
-    }
-
-    if (data.status !== undefined) {
-      return data;
-    }
-
-    if (data.url) {
-      return { status: true, data: data };
-    }
-
-    return { status: true, data: data };
-  };
-
-  /**
-   * Load latest dramas
-   */
-  const loadLatestDramas = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchAPI("/latest");
-
-      if (data.status && data.data && data.data.length > 0) {
-        // Backend already flattened and transformed the data
-        setLatestDramas(data.data);
-        setFilteredDramas(data.data);
-        setActiveTab("latest");
-      } else {
-        throw new Error("Tidak ada data drama");
-      }
-    } catch (error: any) {
-      showMessage("❌ Gagal memuat drama: " + error.message, "error");
-      setLatestDramas([]);
-      setFilteredDramas([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Search dramas
-   */
-  const searchDrama = async (keyword?: string) => {
-    const query = keyword || searchKeyword;
-    if (!query.trim()) {
-      showMessage("⚠️ Masukkan kata kunci pencarian!", "warning");
-      return;
-    }
-
-    setSearchKeyword(query);
-    setActiveTab("search");
-    setLoading(true);
-    setShowHero(false);
-
-    try {
-      const data = await fetchAPI("/search", { query: query });
-
-      if (data.status && data.data && data.data.length > 0) {
-        // Backend already flattened and transformed the data
-        setSearchResults(data.data);
-        setFilteredDramas(data.data);
-      } else {
-        setSearchResults([]);
-        setFilteredDramas([]);
-        showMessage("Drama tidak ditemukan", "info");
-      }
-    } catch (error: any) {
-      showMessage("❌ Pencarian gagal: " + error.message, "error");
-      setSearchResults([]);
-      setFilteredDramas([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Apply filters to dramas
-   */
-  const applyFilters = (dramas: Drama[], filters: FilterOptions): Drama[] => {
+  const applyFilters = useCallback((dramas: Drama[], filters: FilterOptions): Drama[] => {
     let filtered = [...dramas];
 
     // Filter by genre
@@ -212,21 +142,35 @@ const HomePage: React.FC<HomePageProps> = () => {
     }
 
     return filtered;
+  }, []);
+
+  const sourceData = useMemo(() => {
+    if (selectedMood) return moodResults;
+    if (activeTab === "search") return searchResults;
+    return latestDramas;
+  }, [selectedMood, moodResults, activeTab, searchResults, latestDramas]);
+
+  const filteredDramas = useMemo(() => {
+    return applyFilters(sourceData, activeFilters);
+  }, [sourceData, activeFilters, applyFilters]);
+
+  const handleSearch = (keyword?: string) => {
+    const query = keyword || searchKeyword;
+    if (!query.trim()) {
+      showMessage("⚠️ Please enter a search keyword!", "warning");
+      return;
+    }
+    setSearchKeyword(query);
+    setSubmittedQuery(query);
+    setActiveTab("search");
+    setShowHero(false);
+    setSelectedMood(null);
   };
 
-  /**
-   * Handle filter change
-   */
   const handleFilterChange = (filters: FilterOptions) => {
     setActiveFilters(filters);
-    const sourceData = activeTab === "latest" ? latestDramas : searchResults;
-    const filtered = applyFilters(sourceData, filters);
-    setFilteredDramas(filtered);
   };
 
-  /**
-   * Select drama to play
-   */
   const selectDrama = async (
     bookId: string,
     name: string,
@@ -247,45 +191,11 @@ const HomePage: React.FC<HomePageProps> = () => {
 
     // Add to history
     addToHistory(drama, 1);
-
-    await loadEpisode(bookId, 1);
   };
 
-  /**
-   * Load episode
-   */
-  const loadEpisode = async (bookId: string, episode: number) => {
-    try {
-      setVideoUrl("");
-      setVideoQualities([]);
-      showMessage(`⏳ Memuat episode ${episode}...`, "info");
-
-      const data = await fetchAPI("/stream", { bookId, episode });
-
-      if (data.status && data.data && data.data.url) {
-        setVideoUrl(data.data.url);
-        if (data.data.qualities && Array.isArray(data.data.qualities)) {
-          setVideoQualities(data.data.qualities);
-        }
-        showMessage(`✅ Episode ${episode} berhasil dimuat!`, "success");
-      } else if (data.url) {
-        setVideoUrl(data.url);
-        showMessage(`✅ Episode ${episode} berhasil dimuat!`, "success");
-      } else {
-        throw new Error("Link streaming tidak ditemukan");
-      }
-    } catch (error: any) {
-      showMessage("❌ Gagal memuat episode: " + error.message, "error");
-    }
-  };
-
-  /**
-   * Change episode
-   */
   const changeEpisode = (newEpisode: number) => {
     if (newEpisode >= 1 && newEpisode <= maxEpisode && currentDrama) {
       setCurrentEpisode(newEpisode);
-      loadEpisode(currentDrama.bookId, newEpisode);
 
       // Update history
       const drama: Drama = {
@@ -298,9 +208,6 @@ const HomePage: React.FC<HomePageProps> = () => {
     }
   };
 
-  /**
-   * Previous episode
-   */
   const previousEpisode = () => {
     if (currentEpisode > 1) {
       changeEpisode(currentEpisode - 1);
@@ -321,7 +228,6 @@ const HomePage: React.FC<HomePageProps> = () => {
    */
   const closeVideoPlayer = () => {
     setCurrentDrama(null);
-    setVideoUrl("");
   };
 
   /**
@@ -329,7 +235,9 @@ const HomePage: React.FC<HomePageProps> = () => {
    */
   const handleExplore = () => {
     setShowHero(false);
-    loadLatestDramas();
+    setActiveTab("latest");
+    setSubmittedQuery("");
+    setSelectedMood(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -342,49 +250,36 @@ const HomePage: React.FC<HomePageProps> = () => {
     showMessage(`✅ ${drama.name} ${action} favorites!`, "success");
   };
 
-  const handleMoodSelect = useCallback(async (mood: string) => {
+  const handleMoodSelect = useCallback((mood: string) => {
     setSelectedMood(mood);
-    setLoading(true);
-    
-    try {
-      const response = await fetch(`${API_BASE}/mood/${mood}`);
-      const data = await response.json();
-      
-      if (data.status && data.data) {
-        setMoodDramas(data.data);
-        setFilteredDramas(data.data);
-        setShowHero(false);
-        showMessage(`🎭 Found ${data.data.length} ${mood} dramas!`, "success");
-      }
-    } catch (error) {
-      showMessage("Failed to load mood recommendations", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [API_BASE]);
+    setShowHero(false);
+    setActiveTab("latest"); // Or keep it as is, just using mood data
+    setSubmittedQuery("");
+  }, []);
 
   const clearMoodFilter = useCallback(() => {
     setSelectedMood(null);
-    setMoodDramas([]);
-    setFilteredDramas(latestDramas);
-  }, [latestDramas]);
-
-  // Load latest dramas on mount
-  useEffect(() => {
-    loadLatestDramas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update filtered dramas when source changes
+  // Handle URL search params
   useEffect(() => {
-    const sourceData = activeTab === "latest" ? latestDramas : searchResults;
-    const filtered = applyFilters(sourceData, activeFilters);
-    setFilteredDramas(filtered);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestDramas, searchResults, activeTab]);
+    const query = searchParams.get("q");
+    if (query) {
+      setSearchKeyword(query);
+      setSubmittedQuery(query);
+      setActiveTab("search");
+      setShowHero(false);
+    }
+  }, [searchParams]);
 
   return (
-    <div className="home-page">
+    <motion.div 
+      className="home-page"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       {/* Message Toast */}
       {message.text && (
         <div className="message-container">
@@ -406,7 +301,17 @@ const HomePage: React.FC<HomePageProps> = () => {
       )}
 
       {/* Hero Section */}
-      {showHero && <Hero onExplore={handleExplore} onSearch={searchDrama} />}
+      <AnimatePresence>
+        {showHero && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <Hero onExplore={handleExplore} onSearch={handleSearch} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="content-wrapper">
         {/* Search Section */}
@@ -415,7 +320,7 @@ const HomePage: React.FC<HomePageProps> = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                searchDrama();
+                handleSearch();
               }}
             >
               <div className="search-box">
@@ -443,11 +348,12 @@ const HomePage: React.FC<HomePageProps> = () => {
         <div className="tabs-container">
           <div className="tabs">
             <button
-              className={`tab ${activeTab === "latest" ? "active" : ""}`}
+              className={`tab ${!selectedMood && activeTab === "latest" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("latest");
+                setSubmittedQuery("");
+                setSelectedMood(null);
                 setShowHero(false);
-                setFilteredDramas(applyFilters(latestDramas, activeFilters));
               }}
             >
               🔥 Trending Now
@@ -456,7 +362,7 @@ const HomePage: React.FC<HomePageProps> = () => {
               className={`tab ${activeTab === "search" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("search");
-                setFilteredDramas(applyFilters(searchResults, activeFilters));
+                setSelectedMood(null);
               }}
             >
               🔍 Search Results
@@ -472,15 +378,23 @@ const HomePage: React.FC<HomePageProps> = () => {
         </div>
 
         {/* Filter Bar */}
-        {showFilters && (
-          <FilterBar
-            onFilterChange={handleFilterChange}
-            activeFilters={activeFilters}
-          />
-        )}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <FilterBar
+                onFilterChange={handleFilterChange}
+                activeFilters={activeFilters}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Mood Discovery */}
-        {!showHero && (
+        {!showHero && !activeTab.includes("search") && (
           <MoodDiscovery 
             onSelectMood={handleMoodSelect}
             selectedMood={selectedMood}
@@ -488,9 +402,9 @@ const HomePage: React.FC<HomePageProps> = () => {
         )}
 
         {/* Mood Filter Active Banner */}
-        {selectedMood && moodDramas.length > 0 && (
+        {selectedMood && (
           <div className="mood-active-banner">
-            <span>🎭 Showing {moodDramas.length} {selectedMood.replace('-', ' ')} dramas</span>
+            <span>🎭 Showing {selectedMood.replace('-', ' ')} dramas</span>
             <button onClick={clearMoodFilter} className="btn btn-ghost btn-sm">
               ✕ Clear
             </button>
@@ -498,8 +412,13 @@ const HomePage: React.FC<HomePageProps> = () => {
         )}
 
         {/* Continue Watching Section */}
-        {continueWatching.length > 0 && !showHero && (
-          <div className="section animate-fade-in-up" style={{ marginBottom: '2rem' }}>
+        {continueWatching.length > 0 && !showHero && !selectedMood && activeTab === "latest" && (
+          <motion.div 
+            className="section" 
+            style={{ marginBottom: '2rem' }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
             <div className="section-header">
               <h2 className="section-title">▶️ Continue Watching</h2>
               <span className="text-muted">{continueWatching.length} in progress</span>
@@ -517,20 +436,21 @@ const HomePage: React.FC<HomePageProps> = () => {
                 />
               ))}
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Content Section */}
-        <div className="section animate-fade-in-up">
+        <div className="section">
           <div className="section-header">
             <h2 className="section-title">
-              {activeTab === "latest" ? "Trending Dramas" : "Search Results"}
-              {activeTab === "search" && searchKeyword && (
+              {selectedMood ? `${selectedMood.charAt(0).toUpperCase() + selectedMood.slice(1)} Dramas` : 
+               activeTab === "latest" ? "Trending Dramas" : "Search Results"}
+              {activeTab === "search" && submittedQuery && (
                 <span
                   style={{ color: "var(--color-text-muted)", fontWeight: 400 }}
                 >
                   {" "}
-                  for "{searchKeyword}"
+                  for "{submittedQuery}"
                 </span>
               )}
             </h2>
@@ -540,10 +460,10 @@ const HomePage: React.FC<HomePageProps> = () => {
                   {filteredDramas.length} results
                 </span>
               )}
-              {activeTab === "latest" && (
+              {activeTab === "latest" && !selectedMood && (
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={loadLatestDramas}
+                  onClick={() => refetchLatest()}
                   disabled={loading}
                 >
                   {loading ? "⏳ Loading..." : "🔄 Refresh"}
@@ -566,17 +486,23 @@ const HomePage: React.FC<HomePageProps> = () => {
 
           {/* Drama Grid */}
           {!loading && filteredDramas.length > 0 && (
-            <div className="drama-grid">
+            <motion.div 
+              className="drama-grid"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
               {filteredDramas.map((drama, index) => (
-                <DramaCard
-                  key={`${drama.bookId}-${index}`}
-                  drama={drama}
-                  onSelect={selectDrama}
-                  isFavorite={isFavorite(drama.bookId)}
-                  onToggleFavorite={handleToggleFavorite}
-                />
+                <motion.div key={`${drama.bookId}-${index}`} variants={itemVariants}>
+                  <DramaCard
+                    drama={drama}
+                    onSelect={selectDrama}
+                    isFavorite={isFavorite(drama.bookId)}
+                    onToggleFavorite={handleToggleFavorite}
+                  />
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           )}
 
           {/* Empty State */}
@@ -601,8 +527,9 @@ const HomePage: React.FC<HomePageProps> = () => {
                   if (activeTab === "search") {
                     setActiveTab("latest");
                     setSearchKeyword("");
+                    setSubmittedQuery("");
                   } else {
-                    loadLatestDramas();
+                    refetchLatest();
                   }
                 }}
               >
@@ -619,15 +546,13 @@ const HomePage: React.FC<HomePageProps> = () => {
           currentDrama={currentDrama}
           currentEpisode={currentEpisode}
           maxEpisode={maxEpisode}
-          videoUrl={videoUrl}
-          qualities={videoQualities}
           onEpisodeChange={changeEpisode}
           onPrevious={previousEpisode}
           onNext={nextEpisode}
           onClose={closeVideoPlayer}
         />
       )}
-    </div>
+    </motion.div>
   );
 };
 
